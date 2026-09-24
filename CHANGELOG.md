@@ -5,6 +5,11 @@
 
 ## [1.0.1] - 2026-09-24
 
+### 文档更新
+- README 部署章节区分「调试期前台起」与「低延迟常驻」：本机调试用 `scripts/run.sh` 前台起即可，
+  LaunchAgent 常驻只在需要长期开着的联调场景用（常驻跑的是 home 下运行副本，改完源码要 `deploy.sh`）
+- README 架构图纠正为「权重内置 `/models`」（`VOLUME ["/models"]` 已移除，曾被匿名卷遮蔽）
+
 ### 新增
 - **OpenAPI 3.0.3 扁平化档**（`GET /openapi-kingdee.json`，或 `python -m laya_api.openapi30 --profile kingdee`）：
   针对金蝶苍穹 `JsonSchemaToParamDefinitionConverter` 的 NPE（实测报错 `convertSchema:150`）——内联全部 `$ref`、

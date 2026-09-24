@@ -232,10 +232,20 @@ npx -p typescript@5.9.2 tsc --noEmit -p sdk/ts
 
 ## 部署
 
-### 本机常驻（macOS / launchd）
+### 本机运行（macOS）
+
+**调试期不必常驻** —— 直接前台起，Ctrl-C 停，最省事：
 
 ```bash
-bash scripts/install-service.sh           # 部署 + 安装 LaunchAgent（常驻，最低延迟）
+bash scripts/run.sh                      # 前台起服务（默认 127.0.0.1:8765；Ctrl-C 停）
+curl -s 'http://127.0.0.1:8765/readyz?warm=1'
+# 想后台跑又不装服务（临时）：nohup bash scripts/run.sh > /tmp/laya-api.log 2>&1 &
+```
+
+要低延迟常开（反复调试/给别的系统联调）才装成 LaunchAgent：
+
+```bash
+bash scripts/install-service.sh           # 部署 + 安装 LaunchAgent（常驻）
 bash scripts/deploy.sh                    # 改完源码后同步运行副本 + 重启
 bash scripts/uninstall-service.sh         # 卸载（回滚）
 # 日志：~/Library/Logs/laya-decision-api/service.{out,err}.log
@@ -256,7 +266,7 @@ bash scripts/uninstall-service.sh         # 卸载（回滚）
 ```
 builder(python:3.12-slim) ──pip→ /install ──┐
                                             ├─► runner ──► 一个镜像
-源码 src/ + contract/ + entrypoint ─────────┘   非 root / HEALTHCHECK / VOLUME /models
+源码 src/ + contract/ + entrypoint ─────────┘   非 root / HEALTHCHECK / 权重内置 /models
 ```
 
 **基础镜像怎么选**（决定了构建期要不要下 torch）：
