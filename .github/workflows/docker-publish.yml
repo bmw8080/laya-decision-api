@@ -1,0 +1,117 @@
+name: Docker 发布（Docker Hub）
+
+# 为什么由 CI 构建并推送，而不是从本地推：
+#   镜像 1.7GB，权重那一层是单个 600MB+ 的大请求；家用/热点上行要几十分钟，
+#   中途极易被代理或 CDN 掐断（实测：推完 14/16 层后连续 502 Bad Gateway，20 分钟无进展）。
+#   GitHub 的 runner 是机房带宽、原生 amd64（不用 QEMU），一次构建+推送约 5–10 分钟。
+#
+# 需要在仓库 Settings → Secrets and variables → Actions 里配置两个 secret：
+#   DOCKERHUB_USERNAME   Docker Hub 用户名（bmw8080）
+#   DOCKERHUB_TOKEN      Docker Hub 的 Access Token（Read & Write）
+# 没配置时本工作流会在登录步骤失败，属预期。
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "镜像标签版本（留空 = 用 pyproject.toml 的版本）"
+        required: false
+      with_weights:
+        description: "把权重打进镜像（false = 瘦身镜像，运行时自行挂载/拉取）"
+        type: boolean
+        default: true
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析版本与构建选项
+        id: cfg
+        run: |
+          V="${{ inputs.version }}"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then V="${GITHUB_REF_NAME#v}"; fi
+          if [ -z "$V" ]; then
+            V="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' pyproject.toml | head -1)"
+          fi
+          WW="${{ inputs.with_weights }}"
+          if [ -z "$WW" ]; then WW="true"; fi
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "with_weights=$WW" >> "$GITHUB_OUTPUT"
+          echo "  版本=$V  打权重=$WW"
+
+      - name: 恢复权重缓存
+        if: steps.cfg.outputs.with_weights == 'true'
+        uses: actions/cache@v4
+        with:
+          path: weights
+          key: laya-weights-multilingual-v1
+
+      - name: 拉取权重（ModelScope 国内直连，命中缓存则跳过）
+        if: steps.cfg.outputs.with_weights == 'true'
+        run: |
+          if [ ! -f weights/multilingual/model.safetensors ]; then
+            bash scripts/fetch-weights.sh ./weights
+          fi
+          ls -la weights/multilingual | head -5
+          du -sh weights
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: 登录 Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: 构建并推送（linux/amd64，runner 原生架构，不用 QEMU）
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          load: true          # 同时载入本地，供下一步冒烟
+          tags: |
+            bmw8080/laya-decision-api:${{ steps.cfg.outputs.version }}
+            bmw8080/laya-decision-api:latest
+          build-args: |
+            PIP_INDEX_URL_BUILD=https://pypi.org/simple
+            TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
+            DEBIAN_MIRROR=
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: 冒烟：拉起来验一遍（带权重时跑真判定）
+        run: |
+          IMG="bmw8080/laya-decision-api:${{ steps.cfg.outputs.version }}"
+          docker image inspect "$IMG" --format '  镜像架构: {{.Os}}/{{.Architecture}}  大小: {{.Size}}'
+          docker run -d --name smoke -p 8765:8765 -e LAYA_AUTH_MODE=off "$IMG"
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8765/healthz >/dev/null; then ok=1; break; fi
+            sleep 3
+          done
+          [ "$ok" = "1" ] || { echo "  ✗ /healthz 不通"; docker logs smoke | tail -30; docker rm -f smoke; exit 1; }
+          echo "  ✓ /healthz 200"
+          echo "  /openapi-kingdee.json:"; curl -s http://127.0.0.1:8765/openapi-kingdee.json | head -c 120; echo
+          if [ "${{ steps.cfg.outputs.with_weights }}" = "true" ]; then
+            echo "  /readyz:"; curl -s 'http://127.0.0.1:8765/readyz?warm=1'; echo
+            echo "  /v1/decide:"
+            curl -s http://127.0.0.1:8765/v1/decide -H 'content-type: application/json' \
+              -d '{"state":{"body":"账单重复扣款，请退款"},"questions":{"dept":{"type":"choice","instructions":"该由哪个团队处理？","criteria":{"billing":"退款/计费","technical":"故障/缺陷"}}}}' | head -c 300; echo
+          else
+            echo "  （瘦身镜像：不含权重，/readyz 会如实报未就绪，属预期）"
+            curl -s 'http://127.0.0.1:8765/readyz' | head -c 200; echo
+          fi
+          docker rm -f smoke
+
+      - name: 推送结果
+        run: |
+          echo "已推送："
+          echo "  bmw8080/laya-decision-api:${{ steps.cfg.outputs.version }}"
+          echo "  bmw8080/laya-decision-api:latest"

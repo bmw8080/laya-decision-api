@@ -11,6 +11,9 @@
   （503 `MODEL_UNAVAILABLE` 属预期）—— CI 此前会因缺后端而失败，现在实测 `10 passed, 0 failed, 12 skipped`，退出码 0
 
 ### 系统优化
+- 新增 `.github/workflows/docker-publish.yml`：在 GitHub runner 上原生构建 amd64 并推送 Docker Hub
+  （打 `v*` tag 自动发布 / 可手动 Run workflow；带权重缓存与推送后冒烟）
+  —— 起因：从本机经代理推 1.7GB 镜像时，单个 600MB+ 的层反复被掐断（推完 14/16 层后连续 502，20 分钟无进展）
 - CI 增加 Python 版本矩阵（3.11 / 3.12 / 3.13）—— pyproject 声明支持三档，此前只测 3.12
 - 新增 `.github/dependabot.yml`：pip 依赖与 GitHub Actions 版本每周/每月自动检查
 - 新增 `scripts/push-all.sh`：一条命令把分支与 tag 同时推到 GitHub 与 Gitee（防镜像仓库落后）
