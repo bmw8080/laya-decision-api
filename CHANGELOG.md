@@ -11,6 +11,7 @@
   （503 `MODEL_UNAVAILABLE` 属预期）—— CI 此前会因缺后端而失败，现在实测 `10 passed, 0 failed, 12 skipped`，退出码 0
 
 ### 文档更新
+- README 增加「支持这个项目」（微信打赏码，自愿；不影响功能与 issue 优先级）
 - 新增 **docs/openapi-profiles.md**：OpenAPI 三档（3.1 / 3.0 / 扁平档）对照、各自改写了什么、
   平台导入的排障顺序，以及扁平档的已知损失（`required` 降级进描述、联合类型只取一支）
 - README 增补「用现成镜像（Docker Hub）」与「交付记录（实测）」两节；纠正环境变量拼写

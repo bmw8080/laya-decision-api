@@ -12,6 +12,7 @@
 > System-1) decision model: one versioned contract, one FastAPI service, cross-language SDKs
 > (Python / Java / TypeScript), offline OpenAPI 3.1 docs, env-driven auth & rate limiting.
 > Apache-2.0. See [docs/sdk.md](docs/sdk.md) and [docs/api-semantics.md](docs/api-semantics.md).
+> Tipping is welcome but never required (see 支持这个项目 at the bottom).
 
 ## 特性
 
@@ -543,6 +544,14 @@ HTTP 端点（httpx `ASGITransport`）、鉴权与限流、离线文档守门（
 | `BUSY` / `429` | 队列或速率上限；按 `Retry-After` 退避，不要立即重试 |
 | 容器里报后端不可用 | 容器必须 `LAYA_ENGINE=laya_torch`（Linux 没有 Metal） |
 | 改了源码行为没变 | 常驻跑的是 home 运行副本，忘了 `bash scripts/deploy.sh` |
+
+## 支持这个项目
+
+这个项目是业余时间做的，能帮到你我就挺高兴。如果它确实省了你的时间，欢迎扫码打赏一杯咖啡 ☕
+
+<img src="docs/assets/donate-wechat.jpg" alt="微信打赏" width="240">
+
+> 打赏完全自愿：**不影响任何功能、issue 优先级或回复速度**。有问题照常提 issue 就好。
 
 ## 贡献
 
