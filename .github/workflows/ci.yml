@@ -20,8 +20,24 @@ jobs:
       - name: 契约 / 语义 / HTTP 测试
         # 不装推理后端：依赖模型前向的用例自动 SKIP，契约/校验/文档层全跑（CI 不下载 644MB 权重）
         run: python tests/run_contract_tests.py
-      - name: OpenAPI 可生成
-        run: python -c "from laya_api.server import app; import json; d=app.openapi(); print(d['openapi'], len(d['components']['schemas']), 'schemas')"
+      - name: OpenAPI 可生成（原生 + 3.0 档 + 扁平档）
+        # 这一步必须让 laya_api 可导入（测试脚本自己插了 src，这里没有）
+        env:
+          PYTHONPATH: src
+        run: |
+          python - <<'PY'
+          from laya_api.server import app
+          from laya_api.openapi30 import to_openapi_30, to_kingdee_profile
+
+          doc = app.openapi()
+          print("原生  :", doc["openapi"], len(doc["components"]["schemas"]), "schemas")
+          d30 = to_openapi_30(doc)
+          kd = to_kingdee_profile(doc)
+          print("3.0 档:", d30["openapi"], len(d30["paths"]), "endpoints")
+          print("扁平档:", kd["openapi"], len(kd["paths"]), "endpoints")
+          assert kd["openapi"].startswith("3.0."), kd["openapi"]
+          assert '"required": [' not in __import__("json").dumps(kd), "扁平档残留 required"
+          PY
 
   sdk-java:
     runs-on: ubuntu-latest
