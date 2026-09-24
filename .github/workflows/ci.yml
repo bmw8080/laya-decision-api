@@ -16,9 +16,9 @@ jobs:
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip
-          pip install fastapi uvicorn pydantic httpx
+          pip install fastapi uvicorn pydantic httpx openapi-spec-validator
       - name: 契约 / 语义 / HTTP 测试
-        # 无模型环境下自动只跑契约层（依赖模型的分支会跳过），CI 不下载 644MB 权重
+        # 不装推理后端：依赖模型前向的用例自动 SKIP，契约/校验/文档层全跑（CI 不下载 644MB 权重）
         run: python tests/run_contract_tests.py
       - name: OpenAPI 可生成
         run: python -c "from laya_api.server import app; import json; d=app.openapi(); print(d['openapi'], len(d['components']['schemas']), 'schemas')"

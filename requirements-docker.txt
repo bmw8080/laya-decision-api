@@ -1,5 +1,5 @@
 # 容器运行期依赖（Linux）。与 pyproject 的区分：
-#   - pyproject 依赖 `hermes-laya[mlx]` 是 **macOS/Metal** 路径，容器里装不了也用不上；
+#   - pyproject 的后端依赖是 extras：`[mlx]`（macOS/Metal）或 `[torch]`；容器里装不了 mlx 也用不上；
 #   - 容器走 torch 后端：torch + laya（见 Dockerfile 的 TORCH_INDEX_URL / LAYA_PIP_SPEC）。
 fastapi>=0.130
 uvicorn>=0.40
@@ -11,6 +11,7 @@ httpx>=0.28
 #   torch          —— x86_64 / aarch64 均有 manylinux wheel；走 CPU 索引（约 200MB，不带 CUDA 库）
 #   上游 laya      —— py3-none-any 纯 Python，架构无关；会带出 transformers / tokenizers /
 #                     safetensors / huggingface_hub / numpy（都有两架构 wheel）
-# 体积量级（未在无 Docker 环境下实测，按 wheel 大小估算）：基础镜像 ~150MB +
-# CPU torch ~500MB(解包) + transformers 系 ~100MB + 本工程源码 <1MB ≈ 0.8–1.2GB；
+# 体积量级（实测，arm64 VM 跨构建 linux/amd64）：镜像解包 1.76GB（15 层），
+# `docker save | gzip -1` 交付包 902MB —— 主要来自基础镜像 ~150MB + CPU torch（解包约 500MB）
+# + transformers 系 ~100MB + 权重 644MB。
 # 若基础镜像换成 pytorch/pytorch:*（自带 torch）则跳过 torch 安装，总体 2–3GB。

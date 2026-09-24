@@ -1,7 +1,7 @@
 # laya-decision-api
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-21%2F21-brightgreen.svg)](tests/run_contract_tests.py)
+[![CI](https://github.com/bmw8080/laya-decision-api/actions/workflows/ci.yml/badge.svg)](https://github.com/bmw8080/laya-decision-api/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](contract/decision.v1.schema.json)
 
@@ -23,7 +23,7 @@
 | 契约先行 | `pydantic` 模型即真源 → `/openapi.json` 自动生成；文档与实现同源，不会漂移 |
 | 跨语言 | Python 语义层 + Java / TypeScript **零依赖** SDK（都对着真实服务跑通） |
 | 可运维 | 鉴权（多密钥轮换）、按密钥限流、队列 / 超时 / 缓存全部环境变量控制，`/v1/status` 回显生效配置 |
-| 可交付 | 独立单镜像（非 root / HEALTHCHECK / 权重只读挂载），Linux 容器切 torch 后端 |
+| 可交付 | 独立单镜像（非 root / HEALTHCHECK / 权重内置 `/models`，也可切成挂载），Linux 容器切 torch 后端 |
 
 ## 目录结构
 
@@ -42,7 +42,10 @@ laya-decision-api/
 │   ├── ui.py                        # /ui：零构建离线测试台
 │   └── static/swagger/              # 随包分发的 swagger-ui / redoc 资源（含许可原文）
 ├── sdk/{java,ts}/                   # 零依赖跨语言客户端
-├── docs/{api-semantics.md,sdk.md}   # 语义说明（给调用方）、SDK 用法
+├── docs/                            # 语义说明、SDK 用法、OpenAPI 三档对照
+│   ├── api-semantics.md
+│   ├── sdk.md
+│   └── openapi-profiles.md
 ├── tests/                           # 契约 + 语义 + HTTP + 鉴权测试（stdlib，无需 pytest）
 └── scripts/                         # 起服务 / 部署 / launchd / 容器
 ```
@@ -76,6 +79,8 @@ curl -s localhost:8765/v1/decide -H 'content-type: application/json' \
 | `GET` | `/v1/status` | 引擎 / 队列 / 延迟分位 / 计数 + 生效配置（不含密钥） |
 | `GET` | `/v1/presets` | 内置问题集名称 |
 | `POST` | `/v1/admin/reload` | 重新读取环境变量（密钥 / 限流等），无需重启 |
+| `GET` | `/openapi-3.0.json` | OpenAPI **3.0.3** 文档（只认 3.0.x 的平台导入用） |
+| `GET` | `/openapi-kingdee.json` | OpenAPI 3.0.3 **扁平档**（`$ref`/`allOf` 全摊平，给自研 schema 转换器） |
 | `GET` | `/wiki`、`/docs`、`/redoc`、`/openapi.json`、`/ui` | 文档与测试台（离线） |
 
 字段级说明、示例、错误码以 **`/wiki`**（或 `/openapi.json`）为准 —— 那里由 pydantic 模型自动生成，不会与实现脱节。
@@ -299,7 +304,26 @@ curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/mult
 > 镜像内权重目录是 `/models/<model>`（默认 `/models/multilingual`）。Dockerfile 里**没用 `VOLUME` 声明**
 > —— 声明了会在运行时生成匿名卷遮蔽镜像内的权重，反而变成"看起来没权重"。
 
+### 用现成镜像（Docker Hub）
+
+不想自己构建就直接拉（镜像自带权重，起容器即用）：
+
+```bash
+docker pull bmw8080/laya-decision-api:1.0.1
+docker run -d --name laya-api -p 8765:8765 \
+  -e LAYA_AUTH_MODE=api_key -e LAYA_API_KEYS=替换成你的密钥 \
+  bmw8080/laya-decision-api:1.0.1
+curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
+```
+
+- **锁版本**：`1.0.1` 这类具体标签便于回溯；`latest` 跟随最新发布。
+- **架构**：发布的是 `linux/amd64`（服务器主流）。arm64 想本地跑，用源码形态 `bash scripts/run.sh`（走 MLX，比容器快得多）；
+  需要 arm64 镜像就在 arm64 机器上 `bash scripts/docker-build.sh` 自建，Dockerfile 架构中立。
+- **不含密钥**：镜像里不烤鉴权密钥，靠运行期 `-e` 注入；权重已打进镜像，无需挂载。
+
 ### 给只认 OpenAPI 3.0 的平台导入
+
+> 三档（3.1 / 3.0 / 扁平档）怎么选、各自踩过什么坑，见 **[docs/openapi-profiles.md](docs/openapi-profiles.md)**。
 
 FastAPI 原生产出 **OpenAPI 3.1.0**，而部分企业 API 平台（API 网关 / API 管理 / Apifox 等）只认 **3.0.x**，
 导入时会报「无法读取 openapi 信息 / 版本不是 3.0.x」。本服务提供三个入口：
@@ -351,20 +375,20 @@ LAYA_OPENAPI_SERVER_URL=http://10.0.0.5:8765 python -m laya_api.openapi30 > open
 |---|---|---|
 | `BASE_IMAGE` / `RUN_BASE_IMAGE` | `python:3.12-slim-bookworm` | 基础镜像（要预装 torch 就换 `pytorch/pytorch:*`） |
 | `APP_DIR` / `MODELS_DIR` | `/app` / `/models` | 镜像内应用目录 / 权重目录 |
-| `LAY_RUN_USER` / `LAY_RUN_UID` / `LAY_RUN_GID` | `app` / `1001` / `1001` | 运行用户（非 root） |
+| `LAYA_RUN_USER` / `LAYA_RUN_UID` / `LAYA_RUN_GID` | `app` / `1001` / `1001` | 运行用户（非 root） |
 | `LAYA_API_HOST` / `LAYA_API_PORT` | `0.0.0.0` / `8765` | 监听地址 / 端口 |
 | `LAYA_ENGINE` / `LAYA_MODEL` / `LAYA_BACKEND` | `laya_torch` / `multilingual` / `auto` | 引擎 / 模型 / 后端 |
 | `LAYA_MODEL_DIR` | `${MODELS_DIR}/${LAYA_MODEL}` | 权重目录（留空即用默认） |
 | `LAYA_WARM_ON_START` / `LAYA_PREFIX_CACHE` | `1` / `1` | 启动预热 / 前缀缓存 |
 | `LAYA_MAX_QUEUE` / `LAYA_DEFAULT_TIMEOUT_MS` / `LAYA_BUSY_RETRY_AFTER_S` | `16` / `5000` / `1` | 队列与超时 |
-| `LAY_MAX_STATE_CHARS` / `LAY_MAX_OPTIONS` | `4000` / `20` | 体积上限 |
+| `LAYA_MAX_STATE_CHARS` / `LAYA_MAX_OPTIONS` | `4000` / `20` | 体积上限 |
 | `LAYA_AUTH_MODE` / `LAYA_API_KEYS` / `LAYA_AUTH_HEADER` / `LAYA_AUTH_PROTECT_STATUS` | `off` / 空 / `X-API-Key` / `0` | 鉴权 |
 | `LAYA_AUTH_PUBLIC_PATHS` / `LAYA_RATE_LIMIT_PER_MIN` / `LAYA_RATE_LIMIT_BURST` | 见 Dockerfile | 公开路径 / 限流 |
 | `PIP_INDEX_URL_BUILD` / `TORCH_INDEX_URL` / `DEBIAN_MIRROR` / `PIP_FLAGS` / `LAYA_PIP_SPEC` | 见 Dockerfile | 构建源与开关 |
 
 ```bash
 # 例：换个端口与运行用户，同时把鉴权打开（密钥建议运行时给，别烤进镜像）
-LAY_API_PORT=9000 LAYA_RUN_UID=2000 LAYA_AUTH_MODE=api_key \
+LAYA_API_PORT=9000 LAYA_RUN_UID=2000 LAYA_AUTH_MODE=api_key \
   bash scripts/docker-build.sh laya-decision-api:1.0.1
 ```
 
@@ -440,7 +464,7 @@ PLATFORM=linux/amd64 PIP_FLAGS=--no-compile \
   bash scripts/docker-build.sh laya-decision-api:1.0.1-amd64
 ```
 
-实测数据（arm64 机器上跨构建 x86_64）：见 `CHANGELOG` 与本文档末尾的交付记录；构建耗时受 QEMU 与网络影响大。
+实测数据（arm64 机器上跨构建 x86_64）见下方「交付记录」；构建耗时受 QEMU 与网络影响大。
 
 > 若 `deb.debian.org` 在你的网络里被中间设备干扰（构建时报 `Clearsigned file isn't valid, got 'NOSPLIT'`），
 > 用 `DEBIAN_MIRROR` 换源：`bash scripts/docker-build.sh <tag> --build-arg DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn`
@@ -468,8 +492,10 @@ cp .env.docker.example .env.docker && bash scripts/docker-run.sh laya-decision-a
 curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
 ```
 
-> 未在本仓库实测的部分（本机无 Docker）：镜像未真正构建过、torch 后端未在容器里跑过。
-> 上面每条命令都是可执行的，架构与依赖支持是核对 PyPI/Docker Hub 元数据得到的结论，不是推测。
+> **哪些是实测、哪些不是**（避免误读）：镜像构建、`docker load`、容器内权重加载与一次真实判定，
+> 都已在 arm64 VM 上跑过（跨架构构建成 linux/amd64，QEMU 模拟执行），见下方「交付记录」；
+> 但 **QEMU 下的耗时数字不代表 x86_64 原生性能**（模拟层慢两个数量级）。
+> 本机（Apple Silicon，无 Docker）只跑了前台 / launchd 形态。
 
 ### 后端对照（同一份 safetensors 权重，各形态共用）
 
@@ -492,14 +518,17 @@ python tests/run_contract_tests.py
 
 覆盖：契约校验与错误码、超预算、golden 用例、同 state 连打 10 次的稳定性与概率波动、
 HTTP 端点（httpx `ASGITransport`）、鉴权与限流、离线文档守门（`/docs`、`/redoc` 不得引用 CDN；
-`/wiki` 只能渲染 OpenAPI，不许混进 README 内容）。
+`/wiki` 只能渲染 OpenAPI，不许混进 README 内容）、OpenAPI 三档的守门断言。
+
+**没装推理后端时**（CI / 只想验契约）：依赖模型前向的用例自动 `SKIP`，其余全跑 —
+实测 `10 passed, 0 failed, 12 skipped`，退出码 0；装好后端则 `21 passed, 0 failed`。
 
 ## 工程约束与设计取舍
 
 - **契约是兼容性红线**：破坏性改动必须新开 `v2`，不在 v1 里改字段含义。
 - **序列预算 512 token**（头部 192）。选项过多会被预算顶掉 → 接口层返回 `OVER_BUDGET`，而不是让模型抛 `ValueError`。
 - **单设备串行**：`get_agent` 按 `(backend, model)` 缓存但不做串行 → 本服务的 worker 单线程串行执行；要吞吐就走多问题一次前向或横向扩进程。
-- **常驻内存约 0.7GB**（multilingual fp16），加载约 2.15s（打本地权重补丁后；未打补丁会联网校验，实测卡 150s）。
+- **常驻内存约 0.7GB**（multilingual fp16），加载 0.46–0.73 秒（打本地权重补丁后；未打补丁会联网校验，实测卡 150s）。
 - **超时语义**：MLX 推理无法中途取消。超时只保证调用方拿到 504，底层那次前向会跑完再释放 worker（响应带 `inference_still_running` 警告）。
 - **概率校准 ≠ 准确率**：`confidence` 是模型自校准值，业务阈值 τ 必须用自己的样本标定。
 - **不替调用方拍板**：服务端只回概率与置信度；低置信度回退大模型是可选的 `ThresholdRouter`，默认不介入。
@@ -519,6 +548,23 @@ HTTP 端点（httpx `ASGITransport`）、鉴权与限流、离线文档守门（
 
 欢迎提 issue / PR。约定见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，行为准则见 **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**，
 安全问题走 **[SECURITY.md](SECURITY.md)**（不要开公开 issue）。变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 交付记录（实测）
+
+在 arm64 Ubuntu VM（2 vCPU / 4GB，Docker 28.0.4 + buildx 0.22，已注册 QEMU amd64）上跨架构构建 `linux/amd64`：
+
+| 项 | 结果 |
+|---|---|
+| 构建耗时 | 构建缓存命中约 7 分钟；冷缓存（要下 torch 轮子）25–35 分钟 |
+| 镜像 | 解包 1.76GB（15 层）；`docker save \| gzip` 后交付包 902MB |
+| 镜像架构 | `linux/amd64`（构建机是 arm64，靠 `PLATFORM=linux/amd64` + QEMU） |
+| 容器内自检 | `/healthz` 200；权重加载成功 `loaded:["laya_torch/multilingual"]` |
+| 容器内真判定 | 返回 `choice` + 概率分布 + `confidence`，`request_id` 原样回显 |
+| 三档文档 | `/openapi.json` 3.1 ｜ `/openapi-3.0.json` 3.0.3 ｜ `/openapi-kingdee.json` 3.0.3 扁平（`required` 残留 0） |
+| 交付包校验 | `sha256sum -c` 通过，跨机二次校验一致 |
+
+> **QEMU 下的耗时不代表 x86_64 原生性能**：模拟层里模型加载 46–50 秒、单次判定约 12 秒；
+> 同一份权重在 arm64 宿主（MLX 形态）上热调用是 8–22 毫秒。要在 x86 上看真实性能，只能在 x86 上原生跑。
 
 ## 许可证
 

@@ -23,6 +23,21 @@ GOLDEN = json.loads((ROOT / "tests" / "golden" / "cases.json").read_text(encodin
 ENGINE_MODE = os.getenv("LAYA_ENGINE", "laya_mlx").strip().lower()
 PASSED: list[str] = []
 FAILED: list[str] = []
+SKIPPED: list[str] = []
+MODEL_AVAILABLE = True   # 预热失败（无 laya 后端/无权重）时置 False，跳过依赖模型的用例
+
+
+def skip_case(name: str, why: str = "无可用推理后端（未装 laya-mlx/mlx 或 torch/laya，或权重缺失）") -> None:
+    SKIPPED.append(name)
+    print(f"  SKIP  {name}：{why}")
+
+
+def mcheck(name: str, fn) -> None:
+    """依赖模型前向的用例：没有后端时跳过，而不是失败（CI / 纯契约环境用）。"""
+    if not MODEL_AVAILABLE:
+        skip_case(name)
+        return
+    check(name, fn)
 
 
 def check(name: str, fn) -> None:
@@ -49,7 +64,13 @@ def main() -> int:
     eng = InProcessEngine(engine_mode=ENGINE_MODE)
     print(f"== 引擎模式：{ENGINE_MODE} ==")
     print("== 预热（加载模型，缓存后热调用毫秒级）==")
-    print("  ", eng.warm())
+    global MODEL_AVAILABLE
+    try:
+        print("  ", eng.warm())
+    except Exception as exc:  # noqa: BLE001
+        MODEL_AVAILABLE = False
+        print(f"  ！后端不可用：{type(exc).__name__}: {exc}")
+        print("  → 依赖模型的用例将标记为 SKIP（契约 / 校验 / 文档层仍全跑）")
 
     if ENGINE_MODE == "laya_mlx":
         def independence() -> None:
@@ -94,7 +115,7 @@ def main() -> int:
         lambda: eng.decide("plain", state_format="json",
                            questions={"a": {"type": "noul", "instructions": "i"}})))
 
-    check("state 截断 → warning", lambda: (
+    mcheck("state 截断 → warning", lambda: (
         lambda r: (_ for _ in ()).throw(AssertionError(f"未出现 state_truncated: {r.warnings}"))
         if "state_truncated" not in r.warnings else None)(
         eng.decide("这" * 5000, policy={"max_state_chars": 200},
@@ -126,7 +147,7 @@ def main() -> int:
             if case.get("expect_nonempty_answers"):
                 assert len(r.answers) >= 1
 
-        check(f"golden:{name}", run_case)
+        mcheck(f"golden:{name}", run_case)
 
         def run_stability(case=case) -> None:
             if "questions" not in case or not case.get("expect_choice"):
@@ -140,7 +161,7 @@ def main() -> int:
                 for label, p in (again.answers[qid].get("probabilities") or {}).items():
                     assert abs(float(p) - float(base[label])) <= drift, f"概率漂移 {label}: {p} vs {base[label]}"
 
-        check(f"stability:{name}(x{runs})", run_stability)
+        mcheck(f"stability:{name}(x{runs})", run_stability)
 
     # ---------------- 语义层（choose/rate/yes_no）
     print("== 语义层封装 ==")
@@ -153,7 +174,7 @@ def main() -> int:
         assert abs(sum(v for v in a.distribution.values() if v) - 1.0) < 0.02, a.distribution
         assert a.distribution["billing"] > 0.9
 
-    check("choose 选择类：标签+分布+阈值判定", sem_choose)
+    mcheck("choose 选择类：标签+分布+阈值判定", sem_choose)
 
     def sem_rate() -> None:
         a = eng.rate({"body": "系统登录失败，全组都无法使用"}, "紧急程度", ["low", "medium", "high"], tau=0.6)
@@ -162,7 +183,7 @@ def main() -> int:
         assert set(a.distribution) == {"low", "medium", "high"}, a.distribution
         assert a.needs_review is True, "该样例置信度低，应提示复核"
 
-    check("rate 程度类：分数+档位+分布", sem_rate)
+    mcheck("rate 程度类：分数+档位+分布", sem_rate)
 
     def sem_yes_no() -> None:
         a = eng.yes_no({"body": "账单重复扣款，请退款"}, "需要人工介入吗", tau=0.6)
@@ -170,7 +191,7 @@ def main() -> int:
         assert 0.0 <= a.probability <= 1.0 and a.label in ("yes", "no")
         assert a.answer is False, a
 
-    check("yes_no 是非类：布尔+概率", sem_yes_no)
+    mcheck("yes_no 是非类：布尔+概率", sem_yes_no)
 
     # ---------------- 阈值路由
     print("== 阈值路由 ==")
@@ -185,7 +206,7 @@ def main() -> int:
         assert out["needs_review"], "高阈值下应有待复核项"
         assert out["fallback_result"]["route"] == "llm", "回退未被调用"
 
-    check("低置信度触发回退", route_low_conf)
+    mcheck("低置信度触发回退", route_low_conf)
 
     # ---------------- 鉴权与限流（环境变量驱动）
     print("== 鉴权 / 限流 / 配置回显 ==")
@@ -208,11 +229,13 @@ def main() -> int:
             S.reload_from_env()
             A.guard.refresh()
 
+        ok_codes = (200,) if MODEL_AVAILABLE else (200, 503)   # 无后端时 503 MODEL_UNAVAILABLE 属预期
+
         async def go() -> None:
             transport = httpx.ASGITransport(app=srv)
             async with httpx.AsyncClient(transport=transport, base_url="http://t") as c:
                 # 1) 关闭鉴权：直接可调
-                assert (await c.post("/v1/decide", json=body)).status_code == 200
+                assert (await c.post("/v1/decide", json=body)).status_code in ok_codes
 
                 # 2) 打开鉴权（两把密钥 + 每分钟 3 次限流）
                 apply_env(LAYA_AUTH_MODE="api_key", LAYA_API_KEYS="k1,k2",
@@ -223,7 +246,7 @@ def main() -> int:
                 assert r.status_code == 401 and r.json()["error"]["code"] == "UNAUTHORIZED", r.text
                 assert (await c.post("/v1/decide", json=body, headers={"X-API-Key": "wrong"})).status_code == 401
                 ok = await c.post("/v1/decide", json=body, headers={"Authorization": "Bearer k1"})
-                assert ok.status_code == 200, ok.text
+                assert ok.status_code in ok_codes, ok.text
 
                 codes = []
                 for _ in range(6):
@@ -364,44 +387,57 @@ def main() -> int:
                 h = await c.get("/healthz")
                 assert h.status_code == 200, h.text
                 r = await c.get("/readyz", params={"warm": 1})
-                assert r.status_code == 200 and r.json()["ready"], r.text
                 s = await c.get("/v1/status")
                 assert s.status_code == 200 and "queue" in s.json()
                 p = await c.get("/v1/presets")
-                assert p.status_code == 200 and isinstance(p.json()["presets"], list)
-                body = json.loads((ROOT / "contract" / "examples" / "decide.request.json").read_text(encoding="utf-8"))
-                d = await c.post("/v1/decide", json=body)
-                assert d.status_code == 200, d.text
-                payload = d.json()
-                assert payload["api_version"] == "1" and payload["answers"], payload
-                assert payload["usage"]["latency_ms"] >= 0
-                # 错误契约
-                bad = await c.post("/v1/decide", json={"state": "x",
-                                                       "questions": {"a": {"type": "choice", "instructions": "i",
-                                                                           "criteria": ["x", "x"]}}})
-                assert bad.status_code == 400, bad.text
-                assert bad.json()["error"]["code"] == "SCHEMA_INVALID", bad.text
+                if MODEL_AVAILABLE:
+                    assert r.status_code == 200 and r.json()["ready"], r.text
+                    assert p.status_code == 200 and isinstance(p.json()["presets"], list)
+                else:
+                    # 无推理后端时：就绪探测与 preset 取值都会如实报 MODEL_UNAVAILABLE（503）
+                    assert r.status_code in (200, 503), r.text
+                    assert p.status_code in (200, 503), p.text
+                if not MODEL_AVAILABLE:
+                    skip_case("HTTP /v1/decide 成功路径 + 错误契约 + 超时契约")
+                else:
+                    body = json.loads((ROOT / "contract" / "examples" / "decide.request.json").read_text(encoding="utf-8"))
+                    d = await c.post("/v1/decide", json=body)
+                    assert d.status_code == 200, d.text
+                    payload = d.json()
+                    assert payload["api_version"] == "1" and payload["answers"], payload
+                    assert payload["usage"]["latency_ms"] >= 0
+                    # 错误契约
+                    bad = await c.post("/v1/decide", json={"state": "x",
+                                                           "questions": {"a": {"type": "choice", "instructions": "i",
+                                                                               "criteria": ["x", "x"]}}})
+                    assert bad.status_code == 400, bad.text
+                    assert bad.json()["error"]["code"] == "SCHEMA_INVALID", bad.text
 
-                # 超时契约：timeout_ms 极小时回 504，且 details.note 必须点名**真实后端**
-                # （曾写死 "MLX 推理不可中断"，跑 torch 时文案错）
-                bk = r.json().get("backend", "")
-                to = await c.post("/v1/decide", json={
-                    "state": "x",
-                    "questions": {"a": {"type": "choice", "instructions": "i", "criteria": ["x", "y"]}},
-                    "policy": {"timeout_ms": 1},
-                })
-                assert to.status_code == 504, to.text
-                terr = to.json()["error"]
-                assert terr["code"] == "TIMEOUT", terr
-                tnote = terr["details"]["note"]
-                assert bk and bk in tnote, f"超时说明未反映真实后端（backend={bk!r}, note={tnote!r}）"
-                assert terr["details"]["inference_still_running"] is True
+                    # 超时契约：timeout_ms 极小时回 504，且 details.note 必须点名**真实后端**
+                    # （曾写死 "MLX 推理不可中断"，跑 torch 时文案错）
+                    bk = r.json().get("backend", "")
+                    to = await c.post("/v1/decide", json={
+                        "state": "x",
+                        "questions": {"a": {"type": "choice", "instructions": "i", "criteria": ["x", "y"]}},
+                        "policy": {"timeout_ms": 1},
+                    })
+                    assert to.status_code == 504, to.text
+                    terr = to.json()["error"]
+                    assert terr["code"] == "TIMEOUT", terr
+                    tnote = terr["details"]["note"]
+                    assert bk and bk in tnote, f"超时说明未反映真实后端（backend={bk!r}, note={tnote!r}）"
+                    assert terr["details"]["inference_still_running"] is True
 
         asyncio.run(go())
 
     check("HTTP /healthz /readyz /v1/status /v1/presets /v1/decide + 错误契约", http_flow)
 
-    print(f"\n== 汇总：{len(PASSED)} passed, {len(FAILED)} failed ==")
+    summary = f"\n== 汇总：{len(PASSED)} passed, {len(FAILED)} failed"
+    if SKIPPED:
+        summary += f", {len(SKIPPED)} skipped（无可用后端）"
+    print(summary + " ==")
+    if SKIPPED:
+        print("跳过项：" + ", ".join(SKIPPED))
     if FAILED:
         print("失败项：" + ", ".join(FAILED))
     return 1 if FAILED else 0

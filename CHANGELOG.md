@@ -5,7 +5,22 @@
 
 ## [1.0.1] - 2026-09-24
 
+### 修复
+- **无模型环境下测试套件直接崩**（预热抛 `MODEL_UNAVAILABLE` 未被接住）：改为预热失败即标记后端不可用，
+  依赖模型前向的用例统一 `SKIP`；并修正 `/readyz?warm=1`、`/v1/presets`、鉴权用例在无后端时的预期
+  （503 `MODEL_UNAVAILABLE` 属预期）—— CI 此前会因缺后端而失败，现在实测 `10 passed, 0 failed, 12 skipped`，退出码 0
+
 ### 文档更新
+- 新增 **docs/openapi-profiles.md**：OpenAPI 三档（3.1 / 3.0 / 扁平档）对照、各自改写了什么、
+  平台导入的排障顺序，以及扁平档的已知损失（`required` 降级进描述、联合类型只取一支）
+- README 增补「用现成镜像（Docker Hub）」与「交付记录（实测）」两节；纠正环境变量拼写
+  （`LAY_RUN_*`/`LAY_MAX_*` → `LAYA_RUN_*`/`LAYA_MAX_*`）、端点表补两档文档入口、
+  测试章节写明无后端时的 SKIP 行为；去掉已过时的「镜像未实测」免责与悬空引用
+- `.env.docker.example` 补全为完整运行期变量清单（原先只有 8 项，与本文档的声明不符）
+- `requirements-docker.txt` 体积量级改为实测值；pyproject 后端依赖改为 extras
+  （`[mlx]` / `[torch]` / `[hermes]`），项目 URL 指向真实仓库；CI 增加 `openapi-spec-validator`
+  （3.0 档平台校验此前在 CI 里是空跑）
+- 汇报用 PPT 生成脚本移出仓库（含企业内部语境，不属于本工程）
 - README 部署章节区分「调试期前台起」与「低延迟常驻」：本机调试用 `scripts/run.sh` 前台起即可，
   LaunchAgent 常驻只在需要长期开着的联调场景用（常驻跑的是 home 下运行副本，改完源码要 `deploy.sh`）
 - README 架构图纠正为「权重内置 `/models`」（`VOLUME ["/models"]` 已移除，曾被匿名卷遮蔽）

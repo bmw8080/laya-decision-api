@@ -26,19 +26,24 @@ dependencies = [
     "uvicorn>=0.40",
     "pydantic>=2.10",
     "httpx>=0.28",
-    # 决策后端（本机以已有 venv 运行；独立环境需按后端显式安装 laya-mlx+mlx 或 torch+laya）
-    "hermes-laya[mlx]; sys_platform == 'darwin'",
 ]
-# 说明：容器内不使用本文件（Linux 不装 mlx），容器依赖见 requirements-docker.txt。
+# 推理后端不在这里强依赖：按平台显式装（见下）。容器内不使用本文件，
+# 容器依赖见 requirements-docker.txt（torch 后端 + 上游 laya）。
 
 [project.optional-dependencies]
-test = ["pytest>=8"]
+# macOS / Apple Silicon：Metal 加速后端
+mlx = ["laya-mlx", "mlx"]
+# Linux / 容器：CPU 推理（容器里由 Dockerfile 从 CPU 索引装 torch）
+torch = ["laya", "torch"]
+# 与 Hermes Agent 共用同一代码路径时才需要（非必需）
+hermes = ["hermes-laya[mlx]"]
+test = ["pytest>=8", "openapi-spec-validator"]
 
 [project.urls]
-Documentation = "https://github.com/<owner>/laya-decision-api#readme"
-Source = "https://github.com/<owner>/laya-decision-api"
-Issues = "https://github.com/<owner>/laya-decision-api/issues"
-Changelog = "https://github.com/<owner>/laya-decision-api/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/bmw8080/laya-decision-api#readme"
+Source = "https://github.com/bmw8080/laya-decision-api"
+Issues = "https://github.com/bmw8080/laya-decision-api/issues"
+Changelog = "https://github.com/bmw8080/laya-decision-api/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 package-dir = {"" = "src"}

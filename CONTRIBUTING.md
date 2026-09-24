@@ -13,11 +13,14 @@
 
 ```bash
 python3 -m venv .venv
-.venv/bin/pip install -e ".[test]"
+.venv/bin/pip install -e ".[test]"       # 后端另装：.[mlx]（macOS）或 .[torch]（Linux）
 
 bash scripts/run.sh                      # 前台起服务（默认 127.0.0.1:8765）
 python tests/run_contract_tests.py       # 契约 + 语义 + HTTP 全量测试（不需要 pytest）
 ```
+
+**没装推理后端也能跑测试**：依赖模型前向的用例会自动标记 `SKIP`，其余照跑，退出码仍为 0
+（CI 就是这种情形，不下载 644MB 权重）。本地带后端时应是 `21 passed, 0 failed`。
 
 跨语言 SDK 也要能跑（改了契约就得跟着改）：
 
