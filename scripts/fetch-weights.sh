@@ -3,6 +3,8 @@
 # 用法：bash scripts/fetch-weights.sh [目标目录，默认 ./models]
 set -euo pipefail
 DEST="${1:-$(cd "$(dirname "$0")/.." && pwd)/models}"
+# 归一成绝对路径：脚本随后会 cd 进 $DEST/$MODEL，末尾的 ls 若用相对路径（如传入 ./weights）必然失败
+DEST="$(mkdir -p "$DEST" && cd "$DEST" && pwd)"
 MODEL="${LAYA_MODEL:-multilingual}"
 BASE="https://www.modelscope.cn/api/v1/models/convaiinnovations/laya/repo?Revision=master&FilePath=${MODEL}%2F"
 
