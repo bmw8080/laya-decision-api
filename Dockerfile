@@ -1,11 +1,20 @@
 # ============================================================
 # Laya 决策服务 —— 独立镜像
-# 思路对齐 public-affairs-platform：两级镜像 + 非 root + HEALTHCHECK + 入口自检 + 国内源
+# 两级镜像 + 非 root + HEALTHCHECK + 入口自检 + 国内源
 #
 # 基础镜像可用 --build-arg 换（推荐用“已经装好 torch 的官方镜像”，构建就不再下 torch）：
 #   默认（薄）        ：python:3.12-slim-bookworm
 #   预装 torch（推荐）  ：pytorch/pytorch:<ver>-...-runtime（无 GPU 用其 CPU 变体）
 #   离线              ：有网机器构建一次 → docker save → 服务器 docker load
+#
+# 架构（x86_64 / arm64）：
+#   * 本文件**不绑定架构**：python:3.12-slim-bookworm 是 multi-arch manifest，
+#     x86_64 与 arm64 都能构建；容器内走 torch 后端（CPU），上游 `laya` 是 py3-none-any 纯 Python，
+#     torch / tokenizers / numpy / safetensors 在 x86_64 与 aarch64 都有 manylinux wheel（已核）。
+#   * 但镜像架构 = **构建机架构**：Apple Silicon 上 docker build 出来的是 linux/arm64，
+#     推到 x86_64 服务器会 `exec format error`。跨架构请显式给平台（见 scripts/docker-build.sh）：
+#       PLATFORM=linux/amd64 bash scripts/docker-build.sh <tag>     # 在 arm64 机上为 x86 构建（QEMU，慢）
+#     或在目标架构的机器上直接构建（推荐，最快且无模拟层）。
 # ============================================================
 
 ARG BASE_IMAGE=python:3.12-slim-bookworm
@@ -74,7 +83,8 @@ COPY --chown=app:app docker-entrypoint.sh /app/docker-entrypoint.sh
 RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 # 构建期自检：依赖与后端真的能导入，才允许出镜像
-RUN python -c "import fastapi, uvicorn, pydantic, torch, laya; print('build check ok · torch', torch.__version__)"
+RUN python -c "import platform, fastapi, uvicorn, pydantic, torch, laya; \
+      print('build check ok · arch', platform.machine(), '· torch', torch.__version__, '· laya', getattr(laya, '__version__', '?'))"
 
 # ── 权重：不进镜像，运行时挂载（要单文件交付就把权重 COPY 进来，镜像 +644MB）──
 VOLUME ["/models"]

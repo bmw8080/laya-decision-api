@@ -290,6 +290,54 @@ curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/mult
 
 反代：nginx **保留路径**（`proxy_pass http://127.0.0.1:8765;`，不带尾斜杠），`proxy_read_timeout` 给足。
 
+### 架构（x86_64 / arm64）与跨机交付
+
+**镜像架构 = 构建机架构**。Apple Silicon 上构建出来的是 linux/arm64，拷到 x86_64 服务器会
+`exec format error`。三条路，按场景选：
+
+| 场景 | 做法 | 代价 |
+|---|---|---|
+| 有 x86_64 的 Linux（含 VM） | 直接在那台机器上构建 | 最快，无模拟层（**推荐**）|
+| 只有 arm64 Mac | `PLATFORM=linux/amd64 bash scripts/docker-build.sh <tag>` | 需 buildx + QEMU 模拟，torch 层可能十几分钟起 |
+| 构建机与目标机都不能联网 | 有网机器构建 → `docker save` → 拷贝 → `docker load` | 传输 1–2GB 压缩包 |
+
+依赖的架构支持（已核对 PyPI/Docker Hub 元数据，非推测）：
+
+| 组件 | linux/amd64 | linux/arm64 |
+|---|---|---|
+| `torch`（CPU） | `manylinux_2_28_x86_64` wheel ✔ | `manylinux_2_28_aarch64` wheel ✔ |
+| 上游 `laya` | `py3-none-any`（纯 Python，架构无关）✔ | 同左 ✔ |
+| `tokenizers` / `numpy` / `safetensors` | 两架构均有 manylinux wheel ✔ | ✔ |
+| `python:3.12-slim-bookworm`（默认基础镜像） | multi-arch manifest ✔ | ✔ |
+
+> 服务器 CPU 需支持 **AVX2**（torch 官方 wheel 的编译前提）：`lscpu | grep -o avx2`。
+> 老 CPU 上要换源码编译版 torch。
+
+**一条命令打包（在 Ubuntu VM / x86 构建机上跑）**：
+
+```bash
+bash scripts/docker-ship.sh laya-decision-api:1.0.0 ./dist
+# 顺带把 644MB 权重也打包（目标服务器不能上 ModelScope 时）：
+WITH_WEIGHTS=1 bash scripts/docker-ship.sh laya-decision-api:1.0.0 ./dist
+```
+
+它会依次做：环境自检（架构 / docker / buildx / 磁盘）→ 构建 → **镜像内真实 import 自检** →
+`docker save` + gzip + SHA-256 → 打印服务器侧命令（校验 → `docker load` → 权重 → 起服务 → 健康检查）。
+
+**目标服务器上**：
+
+```bash
+sha256sum -c laya-decision-api-amd64-1.0.0.tar.gz.sha256
+docker load < laya-decision-api-amd64-1.0.0.tar.gz
+docker image inspect laya-decision-api:1.0.0 --format '{{.Os}}/{{.Architecture}}'   # 应为 linux/amd64
+bash scripts/fetch-weights.sh /opt/laya-models     # 或解包一起拷过来的权重包
+cp .env.docker.example .env.docker && bash scripts/docker-run.sh laya-decision-api:1.0.0
+curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
+```
+
+> 未在本仓库实测的部分（本机无 Docker）：镜像未真正构建过、torch 后端未在容器里跑过。
+> 上面每条命令都是可执行的，架构与依赖支持是核对 PyPI/Docker Hub 元数据得到的结论，不是推测。
+
 ### 后端对照（同一份 safetensors 权重，各形态共用）
 
 | 形态 | `LAYA_ENGINE` | 依赖 | 说明 |

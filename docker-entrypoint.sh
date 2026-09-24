@@ -25,7 +25,7 @@ fi
 
 for f in model.safetensors rl_agent_config.json encoder/config.json; do
   if [ ! -e "$DIR/$f" ]; then
-    echo "[entrypoint] 权重不完整：缺少 $DIR/$f（跑 scripts/fetch-weights.sh 续传补全）" >&2
+    echo "[entrypoint] 权重不完整：缺少 ${DIR}/${f}（跑 scripts/fetch-weights.sh 续传补全）" >&2
     exit 78
   fi
 done

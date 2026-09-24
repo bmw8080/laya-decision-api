@@ -5,6 +5,17 @@
 
 ## [Unreleased]
 
+### 新增
+- `scripts/docker-ship.sh`：一条命令打包离线交付物（环境自检 → 构建 → 镜像内 import 自检 → `docker save` + SHA-256 → 打印服务器侧命令），支持 `WITH_WEIGHTS=1` 连权重一起打
+
+### 修复
+- 容器脚本里 `$VAR` 紧跟中文被 bash 当成变量名的一部分（`set -u` 下报 unbound variable）：`docker-build.sh` / `docker-entrypoint.sh` 统一改为 `${VAR}`（入口脚本的权重缺失分支此前会直接崩，而不是给出提示）
+
+### 变更
+- 镜像架构显式可控：`PLATFORM=linux/amd64 bash scripts/docker-build.sh <tag>`（跨架构构建走 buildx + `--load`），构建后自动核对产物架构并对 x86/arm 不匹配给出警告
+- `requirements-docker.txt` 去掉不再需要的 `markdown`（`/wiki` 已改为纯 OpenAPI 渲染），并写明各依赖的架构支持与体积构成
+- Dockerfile 构建期自检打印真实架构与 torch/laya 版本
+
 ## [1.0.0] - 2026-09-24
 
 首个版本。

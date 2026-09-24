@@ -5,5 +5,12 @@ fastapi>=0.130
 uvicorn>=0.40
 pydantic>=2.10
 httpx>=0.28
-# /wiki 内置文档页用（渲染 docs/api-semantics.md）；装不上会退化为纯文本展示，不影响服务
-markdown>=3.6
+
+# 说明（架构无关性）：以上 4 个都是 py3-none-any 纯 Python，x86_64 与 arm64 通吃。
+# 另外两处依赖由 Dockerfile 单独装：
+#   torch          —— x86_64 / aarch64 均有 manylinux wheel；走 CPU 索引（约 200MB，不带 CUDA 库）
+#   上游 laya      —— py3-none-any 纯 Python，架构无关；会带出 transformers / tokenizers /
+#                     safetensors / huggingface_hub / numpy（都有两架构 wheel）
+# 体积量级（未在无 Docker 环境下实测，按 wheel 大小估算）：基础镜像 ~150MB +
+# CPU torch ~500MB(解包) + transformers 系 ~100MB + 本工程源码 <1MB ≈ 0.8–1.2GB；
+# 若基础镜像换成 pytorch/pytorch:*（自带 torch）则跳过 torch 安装，总体 2–3GB。
