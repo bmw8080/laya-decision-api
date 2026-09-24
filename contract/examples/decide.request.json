@@ -1,0 +1,23 @@
+{
+  "api_version": "1",
+  "request_id": "demo-0001",
+  "state": {"subject": "登录失败", "body": "系统登录失败，全组都无法使用"},
+  "state_format": "json",
+  "questions": {
+    "department": {
+      "type": "choice",
+      "instructions": "Which team should handle this?",
+      "criteria": {"technical": "bugs, outages, access", "billing": "payments, refunds", "account": "profile, password, onboarding"}
+    },
+    "urgency": {
+      "type": "score",
+      "instructions": "How urgent is this?",
+      "criteria": ["low", "medium", "high"]
+    },
+    "needs_human": {
+      "type": "noul",
+      "instructions": "Does a human need to take over?"
+    }
+  },
+  "policy": {"model": "multilingual", "timeout_ms": 5000}
+}

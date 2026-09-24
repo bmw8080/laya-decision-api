@@ -1,0 +1,59 @@
+{
+  "api_version": "1",
+  "request_id": "demo-0001",
+  "_note": "真实抓包（2026-09-24，M4/MLX/multilingual，latency_ms 35.21）。契约示例请以此为准。",
+  "engine": {
+    "model": "multilingual",
+    "backend": "mlx",
+    "pkg": "hermes-laya 1.2.0 / laya-mlx 0.2.0 / mlx 0.32.2"
+  },
+  "answers": {
+    "department": {
+      "type": "choice",
+      "confidence": 0.3657,
+      "action": {
+        "act_probability": 1.0
+      },
+      "choice": "technical",
+      "probabilities": {
+        "technical": 0.5786,
+        "billing": 0.0026,
+        "account": 0.4188
+      }
+    },
+    "urgency": {
+      "type": "score",
+      "confidence": 0.1018,
+      "action": {
+        "act_probability": 1.0
+      },
+      "score": 1.3031,
+      "legend": {
+        "0": "low",
+        "1": "medium",
+        "2": "high"
+      },
+      "probabilities": {
+        "0": 0.1279,
+        "1": 0.4412,
+        "2": 0.4309
+      }
+    },
+    "needs_human": {
+      "type": "noul",
+      "confidence": 0.7231,
+      "action": {
+        "act_probability": 1.0
+      },
+      "noul": 0.2769
+    }
+  },
+  "usage": {
+    "latency_ms": 35.21,
+    "queue_wait_ms": 0.02,
+    "input_tokens": 162,
+    "output_tokens": 0,
+    "cold_start": false
+  },
+  "warnings": []
+}

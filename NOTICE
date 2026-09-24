@@ -1,0 +1,11 @@
+laya-decision-api
+Copyright 2026 laya-decision-api contributors
+
+This product includes software developed at the laya-decision-api project.
+
+It bundles the following third-party components (see THIRD_PARTY_NOTICES.md):
+  - Swagger UI (swagger-ui-dist) 5.29.5 — Apache License 2.0, Copyright SmartBear Software Inc.
+  - ReDoc 2.5.1 — MIT License, Copyright (c) 2015-present, Rebilly, Inc.
+
+The Laya decision model itself is a separate upstream project and is NOT distributed
+with this repository; see its own license before redistributing weights.

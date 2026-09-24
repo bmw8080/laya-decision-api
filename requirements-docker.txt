@@ -1,0 +1,9 @@
+# 容器运行期依赖（Linux）。与 pyproject 的区分：
+#   - pyproject 依赖 `hermes-laya[mlx]` 是 **macOS/Metal** 路径，容器里装不了也用不上；
+#   - 容器走 torch 后端：torch + laya（见 Dockerfile 的 TORCH_INDEX_URL / LAYA_PIP_SPEC）。
+fastapi>=0.130
+uvicorn>=0.40
+pydantic>=2.10
+httpx>=0.28
+# /wiki 内置文档页用（渲染 docs/api-semantics.md）；装不上会退化为纯文本展示，不影响服务
+markdown>=3.6

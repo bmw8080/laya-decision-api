@@ -1,0 +1,32 @@
+{
+  "stability_runs": 10,
+  "max_probability_drift": 0.01,
+  "cases": [
+    {
+      "name": "billing_refund_choice",
+      "state": {"body": "账单重复扣款，请退款"},
+      "questions": {
+        "department": {"type": "choice", "instructions": "Which team?",
+                       "criteria": {"billing": "payments refunds", "technical": "bugs"}}
+      },
+      "expect_choice": {"department": "billing"},
+      "expect_min_confidence": {"department": 0.9}
+    },
+    {
+      "name": "outage_urgency_score",
+      "state": {"body": "系统登录失败，全组都无法使用"},
+      "questions": {
+        "urgency": {"type": "score", "instructions": "紧急程度", "criteria": ["low", "medium", "high"]},
+        "needs_human": {"type": "noul", "instructions": "需要人工介入吗"}
+      },
+      "expect_answer_types": {"urgency": "score", "needs_human": "noul"},
+      "expect_probabilities_sum": {"urgency": 1.0}
+    },
+    {
+      "name": "preset_triage_runs",
+      "state": "用户反馈：导出报表一直转圈，重试三次都不行",
+      "preset": "triage",
+      "expect_nonempty_answers": true
+    }
+  ]
+}

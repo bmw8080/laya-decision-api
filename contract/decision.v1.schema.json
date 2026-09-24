@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://local/laya/decision.v1.schema.json",
+  "title": "Laya Decision API v1",
+  "definitions": {
+    "question": {
+      "type": "object",
+      "required": ["type", "instructions"],
+      "properties": {
+        "type": {"enum": ["choice", "score", "noul"]},
+        "instructions": {},
+        "criteria": {
+          "description": "choice: 非空且标签唯一的 list[str] 或 {label: 描述}; score: 非空 list[str]; noul: 可选 {true: 描述, false: 描述}"
+        }
+      },
+      "additionalProperties": true
+    },
+    "policy": {
+      "type": "object",
+      "properties": {
+        "model": {"enum": ["english", "multilingual", "typed-decisions"]},
+        "backend": {"enum": ["auto", "mlx", "coreml", "torch"]},
+        "timeout_ms": {"type": "integer", "minimum": 1, "default": 5000},
+        "max_state_chars": {"type": "integer", "minimum": 1, "default": 4000},
+        "max_options": {"type": "integer", "minimum": 2, "default": 20},
+        "max_queue": {"type": "integer", "minimum": 1, "default": 16},
+        "truncate_state": {"type": "boolean", "default": true},
+        "return_probabilities": {"type": "boolean", "default": true}
+      },
+      "additionalProperties": true
+    }
+  },
+  "oneOf": [
+    {
+      "type": "object",
+      "title": "DecideRequest",
+      "required": ["state"],
+      "properties": {
+        "api_version": {"type": "string", "default": "1"},
+        "request_id": {"type": ["string", "null"]},
+        "state": {},
+        "state_format": {"enum": ["auto", "text", "json", "messages"], "default": "auto"},
+        "questions": {"type": "object", "minProperties": 1, "additionalProperties": {"$ref": "#/definitions/question"}},
+        "preset": {"enum": ["router", "guard", "moderation", "triage"]},
+        "policy": {"$ref": "#/definitions/policy"}
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "title": "DecideResponse",
+      "required": ["api_version", "engine", "answers", "usage"],
+      "properties": {
+        "api_version": {"type": "string"},
+        "request_id": {"type": ["string", "null"]},
+        "engine": {"type": "object", "required": ["model", "backend"],
+                   "properties": {"model": {"type": "string"}, "backend": {"type": "string"},
+                                  "pkg": {"type": "string"}, "engine_mode": {"type": "string"}}},
+        "answers": {"type": "object"},
+        "usage": {"type": "object"},
+        "warnings": {"type": "array", "items": {"type": "string"}}
+      },
+      "additionalProperties": true
+    },
+    {
+      "type": "object",
+      "title": "ErrorResponse",
+      "required": ["api_version", "error"],
+      "properties": {
+        "api_version": {"type": "string"},
+        "request_id": {"type": ["string", "null"]},
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": {"enum": ["SCHEMA_INVALID", "UNAUTHORIZED", "OVER_BUDGET", "RATE_LIMITED",
+                              "BUSY", "MODEL_UNAVAILABLE", "TIMEOUT", "INTERNAL"]},
+            "message": {"type": "string"},
+            "details": {"type": ["object", "null"]}
+          }
+        }
+      },
+      "additionalProperties": true
+    }
+  ]
+}

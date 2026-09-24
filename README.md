@@ -1,0 +1,346 @@
+# laya-decision-api
+
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-21%2F21-brightgreen.svg)](tests/run_contract_tests.py)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](contract/decision.v1.schema.json)
+
+把本地 System-1 决策模型（Laya）包成 **一份版本化契约 + 一个 HTTP 服务 + 跨语言 SDK**：
+交「情境 + 要判断的问题」，回「结论 + 把握程度」。**离线、零 token、不生成文字**。
+
+> **English** — A production-shaped HTTP service around the Laya local (non-autoregressive,
+> System-1) decision model: one versioned contract, one FastAPI service, cross-language SDKs
+> (Python / Java / TypeScript), offline OpenAPI 3.1 docs, env-driven auth & rate limiting.
+> Apache-2.0. See [docs/sdk.md](docs/sdk.md) and [docs/api-semantics.md](docs/api-semantics.md).
+
+## 特性
+
+| | |
+|---|---|
+| 三种问法 | `choice` 多选一 / `score` 有序程度 / `noul` 是否 —— 对应业务上的「分给谁」「多严重」「要不要」 |
+| 概率可编程 | 每次返回概率分布与 `confidence`，阈值由**你的业务**定；服务端不替你拍板 |
+| 离线零成本 | 本地推理，不走任何 API；热调用实测 **8–22 ms**（M4 / MLX / multilingual，常驻约 0.7GB） |
+| 契约先行 | `pydantic` 模型即真源 → `/openapi.json` 自动生成；文档与实现同源，不会漂移 |
+| 跨语言 | Python 语义层 + Java / TypeScript **零依赖** SDK（都对着真实服务跑通） |
+| 可运维 | 鉴权（多密钥轮换）、按密钥限流、队列 / 超时 / 缓存全部环境变量控制，`/v1/status` 回显生效配置 |
+| 可交付 | 独立单镜像（非 root / HEALTHCHECK / 权重只读挂载），Linux 容器切 torch 后端 |
+
+## 目录结构
+
+```
+laya-decision-api/
+├── contract/
+│   ├── decision.v1.schema.json      # 契约真源（JSON Schema，版本化的全部字段与语义）
+│   └── examples/                    # 可直接回放的请求 / 响应样例
+├── src/laya_api/
+│   ├── models.py                    # v1 契约模型（pydantic v2）+ ApiError
+│   ├── settings.py                  # 全部环境变量 → 配置对象（唯一入口）
+│   ├── auth.py                      # 鉴权 + 按密钥令牌桶限流
+│   ├── engine.py                    # 后端适配（laya_mlx / hermes_laya / laya_torch）+ 串行队列
+│   ├── server.py                    # FastAPI 路由 + 本地托管的 Swagger UI / ReDoc
+│   ├── wiki.py                      # /wiki：只渲染 openapi.json 的接口参考
+│   ├── ui.py                        # /ui：零构建离线测试台
+│   └── static/swagger/              # 随包分发的 swagger-ui / redoc 资源（含许可原文）
+├── sdk/{java,ts}/                   # 零依赖跨语言客户端
+├── docs/{api-semantics.md,sdk.md}   # 语义说明（给调用方）、SDK 用法
+├── tests/                           # 契约 + 语义 + HTTP + 鉴权测试（stdlib，无需 pytest）
+└── scripts/                         # 起服务 / 部署 / launchd / 容器
+```
+
+## 快速开始
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -e ".[test]"
+
+bash scripts/run.sh                       # 默认 127.0.0.1:8765（单 worker，必须）
+curl -s localhost:8765/healthz
+curl -s 'localhost:8765/readyz?warm=1'    # 首次会加载模型（约 1–3 秒）
+curl -s localhost:8765/v1/decide -H 'content-type: application/json' \
+     -d @contract/examples/decide.request.json
+```
+
+浏览器打开 `http://127.0.0.1:8765/` 就是内置测试台（零构建、离线可用）；
+`/wiki` 是接口参考，`/docs`（Swagger UI，可 Try it out）与 `/redoc` 是标准 OpenAPI 文档页。
+容器部署见「部署 → 容器」。
+
+## 接口
+
+### 端点
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| `POST` | `/v1/decide` | 一次决策：给情境与问题，返回结论与概率 |
+| `GET` | `/healthz` | 进程存活（不碰模型） |
+| `GET` | `/readyz` | 就绪检查；`?warm=1` 先加载模型再回答 |
+| `GET` | `/v1/status` | 引擎 / 队列 / 延迟分位 / 计数 + 生效配置（不含密钥） |
+| `GET` | `/v1/presets` | 内置问题集名称 |
+| `POST` | `/v1/admin/reload` | 重新读取环境变量（密钥 / 限流等），无需重启 |
+| `GET` | `/wiki`、`/docs`、`/redoc`、`/openapi.json`、`/ui` | 文档与测试台（离线） |
+
+字段级说明、示例、错误码以 **`/wiki`**（或 `/openapi.json`）为准 —— 那里由 pydantic 模型自动生成，不会与实现脱节。
+
+### 入参 `POST /v1/decide`
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `api_version` | string | 否 | 默认 `"1"` |
+| `request_id` | string | 否 | 追踪用，原样回显；不做缓存键 |
+| `state` | any | 是 | 待判断的情境：纯文本 / JSON 对象 / messages 数组 |
+| `state_format` | `auto\|text\|json\|messages` | 否 | 默认 `auto`（原样交给模型序列化器） |
+| `questions` | object | 二选一 | `{qid: {type, instructions, criteria}}`，一次前向可给多个问题 |
+| `preset` | string | 二选一 | 内置问题集：`router`（小模型 vs 前沿模型）、`guard`（越狱 / 注入）、`moderation`、`triage`（工单）、`email` |
+| `policy.model` | string | 否 | `english` / `multilingual`（默认）/ `typed-decisions` |
+| `policy.backend` | string | 否 | `auto`（默认，Apple Silicon 走 mlx）/ `mlx` / `coreml` / `torch` |
+| `policy.timeout_ms` | int | 否 | 默认用服务端 `LAYA_DEFAULT_TIMEOUT_MS`（5000）；`0` = 用服务默认 |
+| `policy.max_state_chars` | int | 否 | 默认 4000（`0` = 用服务默认），超限截断并回 `warnings` |
+| `policy.truncate_state` | bool | 否 | 默认 true；false 时超限直接 `OVER_BUDGET` |
+| `policy.max_options` | int | 否 | 默认 20（模型 token 预算的实用上限） |
+| `policy.max_queue` | int | 否 | 默认 16，超出回 `BUSY` |
+| `policy.return_probabilities` | bool | 否 | 默认 true |
+
+`questions` 的三种类型（校验规则与模型内部一致，接口层提前拦，不让模型抛裸异常）：
+
+```jsonc
+{
+  "department": {"type": "choice", "instructions": "Which team?",
+                 "criteria": {"billing": "payments refunds", "technical": "bugs"}},   // 或 ["billing","technical"]，标签必须唯一
+  "urgency":    {"type": "score",  "instructions": "紧急程度", "criteria": ["low","medium","high"]},
+  "needs_human":{"type": "noul",   "instructions": "需要人工介入吗", "criteria": {"true":"需要","false":"不需要"}}  // criteria 可省
+}
+```
+
+### 返回
+
+```jsonc
+{
+  "api_version": "1",
+  "request_id": "uuid",
+  "engine": {"model": "multilingual", "backend": "mlx", "pkg": "laya_mlx / laya-mlx 0.2.0 / mlx 0.32.2"},
+  "answers": {  // 真实抓包见 contract/examples/decide.response.json
+    "department": {"type":"choice","choice":"technical","confidence":0.3657,
+                   "probabilities":{"technical":0.5786,"billing":0.0026,"account":0.4188},
+                   "action":{"act_probability":1.0}},
+    "urgency":    {"type":"score","score":1.0851,"confidence":0.1376,
+                   "legend":{"0":"low","1":"medium","2":"high"},
+                   "probabilities":{"0":0.1376,"1":0.6397,"2":0.2227},
+                   "action":{"act_probability":0.8647}},
+    "needs_human":{"type":"noul","noul":0.1363,"confidence":0.8637,
+                   "action":{"act_probability":0.8649}}
+  },
+  "usage": {"latency_ms": 17.2, "queue_wait_ms": 0.4, "input_tokens": 32, "output_tokens": 0, "cold_start": false},
+  "warnings": ["state_truncated"]
+}
+```
+
+### 错误码
+
+| code | HTTP | 何时 |
+|---|---|---|
+| `SCHEMA_INVALID` | 400 | 字段缺失 / 类型错 / choice 标签重复等 |
+| `UNAUTHORIZED` | 401 | 未带或错误的密钥（开启 `LAYA_AUTH_MODE=api_key` 时） |
+| `OVER_BUDGET` | 413 | 状态或选项超 token 预算（不截断时） |
+| `RATE_LIMITED` | 429 | 超出该密钥的速率上限；响应带 `Retry-After` |
+| `BUSY` | 503 | 队列满 |
+| `MODEL_UNAVAILABLE` | 503 | 后端 / 权重不可用 |
+| `TIMEOUT` | 504 | 超 `timeout_ms`（底层推理仍在跑，见「工程约束」） |
+| `INTERNAL` | 500 | 其它 |
+
+三条铁律：
+
+1. **概率必给**（`return_probabilities=true` 时）。服务端不替业务拍板阈值。
+2. **「不确定」不是错误**：用低 `confidence` 表达，不抛异常、不回空值。
+3. **错误分层可编程**：按上表分支即可，不需要解析文本。
+
+## 三种问法怎么用
+
+| 语义 | 一句话 | 典型业务 | 问法 |
+|---|---|---|---|
+| **选择类** | 这属于哪一类 / 该给谁 | 工单分派、内容分类、模型路由、打标签 | `choose(...)` / `type=choice` |
+| **程度类** | 有多严重 / 打几分 | 优先级、紧急度、风险分级、满意度 | `rate(...)` / `type=score` |
+| **是非类** | 要不要 / 是不是 | 是否转人工、是否放行、是否违规 | `yes_no(...)` / `type=noul` |
+
+- 读结果只看两项：**结论**（`choice` / `score`+`legend` / `noul`）与 **`confidence`**（≥τ 自动处理，<τ 转人工）。
+- 完整语义说明（选型、误用、阈值标定建议）：**[docs/api-semantics.md](docs/api-semantics.md)**。
+
+```python
+from laya_api.client import LayaClient
+
+c = LayaClient("http://127.0.0.1:8765", api_key=None)   # 开了鉴权就传密钥
+d = c.choose({"body": "账单重复扣款，请退款"}, "该由哪个团队处理？",
+             {"billing": "退款/计费", "technical": "故障/缺陷"}, tau=0.6)
+if d.auto:
+    dispatch(d.label)          # conf ≥ 0.6，自动分派
+else:
+    escalate_to_human()        # 把握不足，转人工
+```
+
+## 客户端 SDK
+
+| 语言 | 位置 | 依赖 | 验证方式 |
+|---|---|---|---|
+| Python | `src/laya_api/client.py`（`choose` / `rate` / `yes_no` + `ThresholdRouter` + `InProcessEngine`） | 项目自身（httpx） | 随全套测试通过 |
+| Java | `sdk/java/` | **零依赖**（JDK 11+ `java.net.http`，自带极简 JSON） | `javac 17` 编译 + 打真实服务跑通 |
+| TypeScript | `sdk/ts/` | **零依赖**（`fetch`） | `node demo.ts` 跑通 + `tsc --strict` 无错 |
+
+```bash
+javac -encoding UTF-8 -d out $(find sdk/java/src -name '*.java')
+java -Dfile.encoding=UTF-8 -cp out local.laya.sdk.Demo http://127.0.0.1:8765
+
+node sdk/ts/demo.ts http://127.0.0.1:8765
+npx -p typescript@5.9.2 tsc --noEmit -p sdk/ts
+```
+
+用法、鉴权传参，以及两个已踩的坑（Java 必须显式 HTTP/1.1、Node 类型剥离不支持参数属性）见
+**[docs/sdk.md](docs/sdk.md)**。
+
+## 运维与安全
+
+全部开关见 **[`.env.example`](.env.example)**（一处清单，容器 / 前台通用）；`GET /v1/status` 回显生效配置
+（密钥只显示数量），改完可 `POST /v1/admin/reload` 热生效，无需重启。
+
+### 鉴权
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `LAYA_AUTH_MODE` | `off` | `off`（本机 / 可信内网）或 `api_key` |
+| `LAYA_API_KEYS` | 空 | 多把并存便于轮换：`key-a,key-b`；只放环境 / 密钥文件，**绝不进镜像** |
+| `LAYA_AUTH_HEADER` | `X-API-Key` | 也接受 `Authorization: Bearer <key>` |
+| `LAYA_AUTH_PROTECT_STATUS` | `0` | `1` 时 `/v1/status` 也要密钥 |
+| `LAYA_AUTH_PUBLIC_PATHS` | healthz/readyz/docs/redoc/wiki/ui/openapi/static | 公开路径白名单 |
+| `LAYA_RATE_LIMIT_PER_MIN` / `_BURST` | `0`（不限流） | 按密钥令牌桶限流，超限 `429` + `Retry-After` |
+
+实测（独立实例，`api_key` + 3/分钟）：健康检查 200；无密钥 401；错密钥 401；正确密钥 200；
+超出后 `429` 且带 `Retry-After: 19`；错误体 `{"error":{"code":"RATE_LIMITED","details":{"retry_after_s":18.49}}}`。
+密钥用 `hmac.compare_digest` 比较（防时序侧信道），日志与状态里只出现密钥的 SHA-256 前 8 位指纹。
+
+### 性能
+
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `LAYA_MAX_QUEUE` | 16 | 排队上限；满了直接 `BUSY`（让调用方退避，不无限堆积） |
+| `LAYA_DEFAULT_TIMEOUT_MS` | 5000 | 请求未指定时的默认超时 |
+| `LAYA_PREFIX_CACHE` | 1 | 缓存问题前缀：20 次同问题不同情境实测 13.20 → **12.41 ms**（约 6%） |
+| `LAYA_BUSY_RETRY_AFTER_S` | 1 | `BUSY` / `429` 的 `Retry-After` |
+| `LAYA_WARM_ON_START` | 1 | 启动即加载模型（首调用不等冷启动） |
+
+实测延迟（M4 / MLX / multilingual，常驻）：热调用 **8–22 ms**（p50 8.45），冷启首调 35–58 ms（含加载 480 ms）；
+串行队列下 `queue_wait` 0.01–0.06 ms。
+
+**单进程串行是刻意设计**：MLX 单设备，多 worker 会各自加载约 0.7GB 且互相抢卡；批量要走「一次前向多问题」而不是并发。
+要横向扩：起 N 个进程（各约 0.7GB）监听不同端口，前置 nginx `least_conn` 轮询即可 —— 服务本身无状态。
+
+## 部署
+
+### 本机常驻（macOS / launchd）
+
+```bash
+bash scripts/install-service.sh           # 部署 + 安装 LaunchAgent（常驻，最低延迟）
+bash scripts/deploy.sh                    # 改完源码后同步运行副本 + 重启
+bash scripts/uninstall-service.sh         # 卸载（回滚）
+# 日志：~/Library/Logs/laya-decision-api/service.{out,err}.log
+```
+
+实测验收：`/healthz` → `{"status":"ok","ready":true,...}`；`/readyz?warm=1` → `loaded:["mlx/multilingual"]`；
+连发多次 `queue_wait` 0.01–0.04 ms；choice 标签重复 → HTTP 400 `SCHEMA_INVALID`。
+
+> **launchd 读不到外置卷（实测踩过）**：若源码放在可移动卷 / 外置盘，macOS 的用户级 LaunchAgent
+> 没有该卷的访问权限，直接跑会报 `Operation not permitted`。因此常驻服务跑的是
+> **home 下的运行副本**（`~/Library/Application Support/laya-decision-api`，由 `scripts/deploy.sh` 同步）。
+> 改完源码务必 `bash scripts/deploy.sh`，否则跑的还是旧副本；前台调试不受此限制。
+
+### 容器（Linux，独立镜像）
+
+两级构建 + 非 root + HEALTHCHECK + 入口自检 + 国内镜像源；laya 作为**独立镜像**运行，不塞进业务镜像。
+
+```
+builder(python:3.12-slim) ──pip→ /install ──┐
+                                            ├─► runner ──► 一个镜像
+源码 src/ + contract/ + entrypoint ─────────┘   非 root / HEALTHCHECK / VOLUME /models
+```
+
+**基础镜像怎么选**（决定了构建期要不要下 torch）：
+
+| 基础镜像 | 构建期动作 | 镜像体积 | 适用 |
+|---|---|---|---|
+| `python:3.12-slim-bookworm`（默认） | 需 `pip install torch`（CPU 版约 200MB） | 约 1GB | 构建机能访问 torch 索引 |
+| 官方 `pytorch/pytorch:<ver>-runtime`（推荐） | torch 已预装，**自动跳过**（`import torch` 探测） | 约 2–3GB | 构建机网络差 / 想少一处失败点 |
+| 有网机器构建后 `docker save` → 服务器 `docker load` | 服务器完全离线 | 同上 | 内网 / 离线交付 |
+
+```bash
+bash scripts/fetch-weights.sh /opt/laya-models      # ModelScope 国内直连，644MB
+bash scripts/docker-build.sh laya-decision-api:uat  # 默认清华 PyPI + torch CPU 索引
+cp .env.docker.example .env.docker
+bash scripts/docker-run.sh laya-decision-api:uat    # 挂 /opt/laya-models:ro，只监听 127.0.0.1:8765
+
+# 验证
+docker run --rm laya-decision-api:uat python -c "import laya, fastapi, uvicorn; print('deps ok')"
+curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/multilingual"]
+```
+
+换基础镜像：`bash scripts/docker-build.sh <tag> --build-arg BASE_IMAGE=… --build-arg RUN_BASE_IMAGE=…`
+（标签请先在构建机 `docker pull` 确认存在）。
+
+| 内容 | 是否进镜像 | 说明 |
+|---|---|---|
+| `src/`、`contract/`、`docker-entrypoint.sh` | 是 | 服务本体与契约 |
+| fastapi / uvicorn / pydantic / httpx | 是 | 见 `requirements-docker.txt` |
+| torch(CPU) + 上游 `laya` | 是 | 容器必须用 torch 后端：MLX 是 macOS + Metal 专属 |
+| 644MB 权重 | 否（挂载） | `-v /opt/laya-models:/models:ro`；要单文件交付就把权重 COPY 进去（镜像 +644MB） |
+
+反代：nginx **保留路径**（`proxy_pass http://127.0.0.1:8765;`，不带尾斜杠），`proxy_read_timeout` 给足。
+
+### 后端对照（同一份 safetensors 权重，各形态共用）
+
+| 形态 | `LAYA_ENGINE` | 依赖 | 说明 |
+|---|---|---|---|
+| Mac 常驻（快） | `laya_mlx`（默认） | `laya-mlx` + `mlx` | Metal 加速，热调用 8–9 ms |
+| Linux 容器 | `laya_torch` | `torch` + 上游 `laya` | 无 Metal |
+| 与 Hermes 同源 | `hermes_laya` | `hermes-laya[mlx]` | 需要与 Hermes 工具 / context engine 走同一代码路径时 |
+
+**与 Hermes 的关系：不必须。** 默认的 `laya_mlx` 是上游普通 pip 包，实测直连时**零 Hermes 模块导入**
+（契约测试里有一条「独立模式未导入任何 Hermes 模块」专门守这个）。接 Hermes 只是额外能力。
+
+## 测试
+
+不依赖 pytest（stdlib 即可跑）：
+
+```bash
+python tests/run_contract_tests.py
+```
+
+覆盖：契约校验与错误码、超预算、golden 用例、同 state 连打 10 次的稳定性与概率波动、
+HTTP 端点（httpx `ASGITransport`）、鉴权与限流、离线文档守门（`/docs`、`/redoc` 不得引用 CDN；
+`/wiki` 只能渲染 OpenAPI，不许混进 README 内容）。
+
+## 工程约束与设计取舍
+
+- **契约是兼容性红线**：破坏性改动必须新开 `v2`，不在 v1 里改字段含义。
+- **序列预算 512 token**（头部 192）。选项过多会被预算顶掉 → 接口层返回 `OVER_BUDGET`，而不是让模型抛 `ValueError`。
+- **单设备串行**：`get_agent` 按 `(backend, model)` 缓存但不做串行 → 本服务的 worker 单线程串行执行；要吞吐就走多问题一次前向或横向扩进程。
+- **常驻内存约 0.7GB**（multilingual fp16），加载约 2.15s（打本地权重补丁后；未打补丁会联网校验，实测卡 150s）。
+- **超时语义**：MLX 推理无法中途取消。超时只保证调用方拿到 504，底层那次前向会跑完再释放 worker（响应带 `inference_still_running` 警告）。
+- **概率校准 ≠ 准确率**：`confidence` 是模型自校准值，业务阈值 τ 必须用自己的样本标定。
+- **不替调用方拍板**：服务端只回概率与置信度；低置信度回退大模型是可选的 `ThresholdRouter`，默认不介入。
+
+## 排障
+
+| 现象 | 先看 |
+|---|---|
+| `/readyz` 里 `ready=false` | 模型是否加载失败：看服务日志与 `/v1/status` 的 `engine` 段 |
+| 调用报 `MODEL_UNAVAILABLE` | `LAYA_ENGINE` 对应的包是否装了（`laya-mlx`/`mlx` 或 `torch`/`laya`）；权重目录是否存在 |
+| 首个请求特别慢 | 冷启动；开 `LAYA_WARM_ON_START=1` 或先打一次 `/readyz?warm=1` |
+| `BUSY` / `429` | 队列或速率上限；按 `Retry-After` 退避，不要立即重试 |
+| 容器里报后端不可用 | 容器必须 `LAYA_ENGINE=laya_torch`（Linux 没有 Metal） |
+| 改了源码行为没变 | 常驻跑的是 home 运行副本，忘了 `bash scripts/deploy.sh` |
+
+## 贡献
+
+欢迎提 issue / PR。约定见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，行为准则见 **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**，
+安全问题走 **[SECURITY.md](SECURITY.md)**（不要开公开 issue）。变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 许可证
+
+[Apache License 2.0](LICENSE)。随包分发的第三方组件（swagger-ui-dist、redoc）许可原文见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `src/laya_api/static/swagger/`。
+Laya 决策模型本体是独立上游项目，**权重不随本仓库分发**。

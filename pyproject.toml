@@ -1,0 +1,51 @@
+[project]
+name = "laya-decision-api"
+version = "1.0.0"
+description = "Laya 本地决策模型的服务化接口（契约 + 本地 HTTP 服务 + 薄客户端 + 阈值路由）"
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = { text = "Apache-2.0" }
+license-files = ["LICENSE", "NOTICE"]
+authors = [{ name = "laya-decision-api contributors" }]
+keywords = ["laya", "decision", "system-1", "fastapi", "openapi", "mlx", "torch", "llm-router"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+]
+dependencies = [
+    "fastapi>=0.130",
+    "uvicorn>=0.40",
+    "pydantic>=2.10",
+    "httpx>=0.28",
+    # 决策后端（本机以已有 venv 运行；独立环境需按后端显式安装 laya-mlx+mlx 或 torch+laya）
+    "hermes-laya[mlx]; sys_platform == 'darwin'",
+]
+# 说明：容器内不使用本文件（Linux 不装 mlx），容器依赖见 requirements-docker.txt。
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[project.urls]
+Documentation = "https://github.com/<owner>/laya-decision-api#readme"
+Source = "https://github.com/<owner>/laya-decision-api"
+Issues = "https://github.com/<owner>/laya-decision-api/issues"
+Changelog = "https://github.com/<owner>/laya-decision-api/blob/main/CHANGELOG.md"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+laya_api = ["static/swagger/*"]

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# 运行时
+logs/
+*.log
+.env
+.env.docker
+
+# 前端/工具产物
+node_modules/
+out/
+*.tsbuildinfo
+
+# 模型权重（644MB，绝不入库）
+*.safetensors
+*.npz
+models/
+
+# 系统
+.DS_Store

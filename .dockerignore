@@ -1,0 +1,22 @@
+# 与 public-affairs-platform 同款思路：镜像只带运行必需
+.git
+.gitignore
+.venv
+__pycache__
+**/__pycache__
+*.pyc
+logs/
+tests/
+sdk/
+# Mac 专属脚本不进镜像（launchd/deploy 那套）；容器只需要 fetch-weights + docker-*.sh
+scripts/install-service.sh
+scripts/uninstall-service.sh
+scripts/deploy.sh
+scripts/run.sh
+scripts/ensure-laya-install.sh
+README.md
+*.md
+.DS_Store
+.env
+.env.*
+*.log
