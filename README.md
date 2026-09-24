@@ -322,6 +322,25 @@ curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multi
   需要 arm64 镜像就在 arm64 机器上 `bash scripts/docker-build.sh` 自建，Dockerfile 架构中立。
 - **不含密钥**：镜像里不烤鉴权密钥，靠运行期 `-e` 注入；权重已打进镜像，无需挂载。
 
+**国内拉不动 Docker Hub 时**——换国内加速前缀，镜像字节与官方一致：
+
+```bash
+# 两条都实测可用（2026-09-24 复核：镜像摘要与 Docker Hub 完全相同）
+docker pull docker.1panel.live/bmw8080/laya-decision-api:1.0.1
+docker pull docker.1ms.run/bmw8080/laya-decision-api:1.0.1     # 需要 token，docker CLI 自动处理
+
+docker tag docker.1panel.live/bmw8080/laya-decision-api:1.0.1 bmw8080/laya-decision-api:1.0.1
+docker run -d --name laya-api -p 8765:8765 \
+  -e LAYA_AUTH_MODE=api_key -e LAYA_API_KEYS=替换成你的密钥 \
+  bmw8080/laya-decision-api:1.0.1
+```
+
+- 加速站是第三方公益镜像，随时可能失效或加白名单限制。反例：`docker.m.daocloud.io` 明确拒绝拉取本项目镜像
+  （用它拉 `python` 这类基础镜像是另一回事，**不要混用**）；失效就换下一条。
+- 拉完想确认拉到的确实是官方那份，核对镜像摘要：`1.0.1` / `latest` 当前为
+  `sha256:64f5e6c38415ab27…`（linux/amd64、15 层、约 922 MB）。
+  查法：`docker pull` 的输出里会打印 Digest，或 `docker image inspect --format '{{index .RepoDigests 0}}' bmw8080/laya-decision-api:1.0.1`。
+
 ### 给只认 OpenAPI 3.0 的平台导入
 
 > 三档（3.1 / 3.0 / 扁平档）怎么选、各自踩过什么坑，见 **[docs/openapi-profiles.md](docs/openapi-profiles.md)**。
