@@ -3,6 +3,18 @@
 本文件格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。契约变更请看 `contract/` 的版本后缀。
 
+## [1.0.2] - 2026-09-24
+
+### 系统优化
+- **发布到 PyPI**：`pip install "laya-decision-api[mlx]"`（macOS/MLX）或 `[torch]`（Linux），
+  并提供 `laya-api` 命令；sdist / wheel 均已上传，`twine check` PASSED
+
+### 文档更新
+- README 加入 PyPI 徽章与 PyPI 安装方式；顶部「最快上手」三种装法一屏看完（Docker / PyPI / 源码）
+- README 内相对链接与图片改为绝对地址：PyPI 项目页的长描述是 README 快照，
+  相对链接（`LICENSE`、`CHANGELOG.md`、`.env.example`、`contract/…`）在 PyPI 上会 404、打赏图会显示成坏图
+- 镜像示例改用 `:latest` 与当前版本号，摘要核对改为"与 Docker Hub 同标签的 Digest 比对"（摘要随版本变，写死会很快过期）
+
 ## [1.0.1] - 2026-09-24
 
 ### 修复

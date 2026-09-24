@@ -1,10 +1,11 @@
 # laya-decision-api
 
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](https://github.com/bmw8080/laya-decision-api/blob/main/LICENSE)
 [![CI](https://github.com/bmw8080/laya-decision-api/actions/workflows/ci.yml/badge.svg)](https://github.com/bmw8080/laya-decision-api/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/laya-decision-api)](https://pypi.org/project/laya-decision-api/)
 [![Docker Pulls](https://img.shields.io/docker/pulls/bmw8080/laya-decision-api)](https://hub.docker.com/r/bmw8080/laya-decision-api)
-[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
-[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](contract/decision.v1.schema.json)
+[![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://github.com/bmw8080/laya-decision-api/blob/main/pyproject.toml)
+[![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](https://github.com/bmw8080/laya-decision-api/blob/main/contract/decision.v1.schema.json)
 
 把本地 System-1 决策模型（Laya）包成 **一份版本化契约 + 一个 HTTP 服务 + 跨语言 SDK**：
 交「情境 + 要判断的问题」，回「结论 + 把握程度」。**离线、零 token、不生成文字**。
@@ -12,7 +13,7 @@
 > **English** — A production-shaped HTTP service around the Laya local (non-autoregressive,
 > System-1) decision model: one versioned contract, one FastAPI service, cross-language SDKs
 > (Python / Java / TypeScript), offline OpenAPI 3.1 docs, env-driven auth & rate limiting.
-> Apache-2.0. See [docs/sdk.md](docs/sdk.md) and [docs/api-semantics.md](docs/api-semantics.md).
+> Apache-2.0. See [docs/sdk.md](https://github.com/bmw8080/laya-decision-api/blob/main/docs/sdk.md) and [docs/api-semantics.md](https://github.com/bmw8080/laya-decision-api/blob/main/docs/api-semantics.md).
 > Tipping is welcome but never required (see 支持这个项目 at the bottom).
 
 ## 最快上手
@@ -20,11 +21,19 @@
 **Docker（镜像自带权重，起容器即用）**
 
 ```bash
-docker run -d --name laya-api -p 8765:8765 bmw8080/laya-decision-api:1.0.1
+docker run -d --name laya-api -p 8765:8765 bmw8080/laya-decision-api:latest
 curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
 ```
 
-**源码（macOS，走 MLX，更快）**
+**PyPI 安装（要改代码/进容器用 Docker 那行）**
+
+```bash
+pip install "laya-decision-api[mlx]"      # macOS / Apple Silicon（Metal 加速，最快）
+pip install "laya-decision-api[torch]"    # Linux / 无 Metal 环境
+laya-api                                  # 起服务（默认 127.0.0.1:8765）
+```
+
+**源码开发（可编辑安装 + 测试）**
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -e ".[test]" && bash scripts/run.sh
@@ -181,7 +190,7 @@ curl -s localhost:8765/v1/decide -H 'content-type: application/json' \
 
 ## OpenAPI 文档档位（3.1 / 3.0 / 扁平档）
 
-> 三档（3.1 / 3.0 / 扁平档）怎么选、各自踩过什么坑，见 **[docs/openapi-profiles.md](docs/openapi-profiles.md)**。
+> 三档（3.1 / 3.0 / 扁平档）怎么选、各自踩过什么坑，见 **[docs/openapi-profiles.md](https://github.com/bmw8080/laya-decision-api/blob/main/docs/openapi-profiles.md)**。
 
 FastAPI 原生产出 **OpenAPI 3.1.0**，而部分企业 API 平台（API 网关 / API 管理 / Apifox 等）只认 **3.0.x**，
 导入时会报「无法读取 openapi 信息 / 版本不是 3.0.x」。本服务提供三个入口：
@@ -231,7 +240,7 @@ LAYA_OPENAPI_SERVER_URL=http://10.0.0.5:8765 python -m laya_api.openapi30 > open
 | **是非类** | 要不要 / 是不是 | 是否转人工、是否放行、是否违规 | `yes_no(...)` / `type=noul` |
 
 - 读结果只看两项：**结论**（`choice` / `score`+`legend` / `noul`）与 **`confidence`**（≥τ 自动处理，<τ 转人工）。
-- 完整语义说明（选型、误用、阈值标定建议）：**[docs/api-semantics.md](docs/api-semantics.md)**。
+- 完整语义说明（选型、误用、阈值标定建议）：**[docs/api-semantics.md](https://github.com/bmw8080/laya-decision-api/blob/main/docs/api-semantics.md)**。
 
 ```python
 from laya_api.client import LayaClient
@@ -262,11 +271,11 @@ npx -p typescript@5.9.2 tsc --noEmit -p sdk/ts
 ```
 
 用法、鉴权传参，以及两个已踩的坑（Java 必须显式 HTTP/1.1、Node 类型剥离不支持参数属性）见
-**[docs/sdk.md](docs/sdk.md)**。
+**[docs/sdk.md](https://github.com/bmw8080/laya-decision-api/blob/main/docs/sdk.md)**。
 
 ## 运维与安全
 
-全部开关见 **[`.env.example`](.env.example)**（一处清单，容器 / 前台通用）；`GET /v1/status` 回显生效配置
+全部开关见 **[`.env.example`](https://github.com/bmw8080/laya-decision-api/blob/main/.env.example)**（一处清单，容器 / 前台通用）；`GET /v1/status` 回显生效配置
 （密钥只显示数量），改完可 `POST /v1/admin/reload` 热生效，无需重启。
 
 ### 鉴权
@@ -367,14 +376,14 @@ curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/mult
 不想自己构建就直接拉（镜像自带权重，起容器即用）：
 
 ```bash
-docker pull bmw8080/laya-decision-api:1.0.1
+docker pull bmw8080/laya-decision-api:1.0.2          # 也可用 :latest
 docker run -d --name laya-api -p 8765:8765 \
   -e LAYA_AUTH_MODE=api_key -e LAYA_API_KEYS=替换成你的密钥 \
-  bmw8080/laya-decision-api:1.0.1
+  bmw8080/laya-decision-api:1.0.2
 curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
 ```
 
-- **锁版本**：`1.0.1` 这类具体标签便于回溯；`latest` 跟随最新发布。
+- **锁版本**：`1.0.2` 这类具体标签便于回溯；`latest` 跟随最新发布。
 - **架构**：发布的是 `linux/amd64`（服务器主流）。arm64 想本地跑，用源码形态 `bash scripts/run.sh`（走 MLX，比容器快得多）；
   需要 arm64 镜像就在 arm64 机器上 `bash scripts/docker-build.sh` 自建，Dockerfile 架构中立。
 - **不含密钥**：镜像里不烤鉴权密钥，靠运行期 `-e` 注入；权重已打进镜像，无需挂载。
@@ -383,18 +392,18 @@ curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multi
 
 ```bash
 # 两条都实测可用（2026-09-24 复核：镜像摘要与 Docker Hub 完全相同）
-docker pull docker.1panel.live/bmw8080/laya-decision-api:1.0.1
-docker pull docker.1ms.run/bmw8080/laya-decision-api:1.0.1     # 需要 token，docker CLI 自动处理
+docker pull docker.1panel.live/bmw8080/laya-decision-api:1.0.2
+docker pull docker.1ms.run/bmw8080/laya-decision-api:1.0.2     # 需要 token，docker CLI 自动处理
 
-docker tag docker.1panel.live/bmw8080/laya-decision-api:1.0.1 bmw8080/laya-decision-api:1.0.1   # 还原成原名
+docker tag docker.1panel.live/bmw8080/laya-decision-api:1.0.2 bmw8080/laya-decision-api:1.0.2   # 还原成原名
 # 之后按上一节的 docker run 起容器即可
 ```
 
 - 加速站是第三方公益镜像，随时可能失效或加白名单限制。反例：`docker.m.daocloud.io` 明确拒绝拉取本项目镜像
   （用它拉 `python` 这类基础镜像是另一回事，**不要混用**）；失效就换下一条。
-- 拉完想确认拉到的确实是官方那份，核对镜像摘要：`1.0.1` / `latest` 当前为
-  `sha256:64f5e6c38415ab27…`（linux/amd64、15 层、约 922 MB）。
-  查法：`docker pull` 的输出里会打印 Digest，或 `docker image inspect --format '{{index .RepoDigests 0}}' bmw8080/laya-decision-api:1.0.1`。
+- 拉完想确认拉到的确实是官方那份：对比**镜像摘要**——加速站返回的 Digest 应与 Docker Hub 上同一标签的
+  Digest 完全一致（`docker pull` 输出里会打印 Digest，或
+  `docker image inspect --format '{{index .RepoDigests 0}}' bmw8080/laya-decision-api:1.0.2`）。
 
 ### 构建期参数（`--build-arg`）与运行期环境变量
 
@@ -575,17 +584,17 @@ HTTP 端点（httpx `ASGITransport`）、鉴权与限流、离线文档守门（
 
 这个项目是业余时间做的，能帮到你我就挺高兴。如果它确实省了你的时间，欢迎扫码打赏一杯咖啡 ☕
 
-<img src="docs/assets/donate-wechat.jpg" alt="微信打赏" width="240">
+<img src="https://raw.githubusercontent.com/bmw8080/laya-decision-api/main/docs/assets/donate-wechat.jpg" alt="微信打赏" width="240">
 
 > 打赏完全自愿：**不影响任何功能、issue 优先级或回复速度**。有问题照常提 issue 就好。
 
 ## 贡献
 
-欢迎提 issue / PR。约定见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，行为准则见 **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**，
-安全问题走 **[SECURITY.md](SECURITY.md)**（不要开公开 issue）。变更记录见 [CHANGELOG.md](CHANGELOG.md)。
+欢迎提 issue / PR。约定见 **[CONTRIBUTING.md](https://github.com/bmw8080/laya-decision-api/blob/main/CONTRIBUTING.md)**，行为准则见 **[CODE_OF_CONDUCT.md](https://github.com/bmw8080/laya-decision-api/blob/main/CODE_OF_CONDUCT.md)**，
+安全问题走 **[SECURITY.md](https://github.com/bmw8080/laya-decision-api/blob/main/SECURITY.md)**（不要开公开 issue）。变更记录见 [CHANGELOG.md](https://github.com/bmw8080/laya-decision-api/blob/main/CHANGELOG.md)。
 
 ## 许可证
 
-[Apache License 2.0](LICENSE)。随包分发的第三方组件（swagger-ui-dist、redoc）许可原文见
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 与 `src/laya_api/static/swagger/`。
+[Apache License 2.0](https://github.com/bmw8080/laya-decision-api/blob/main/LICENSE)。随包分发的第三方组件（swagger-ui-dist、redoc）许可原文见
+[THIRD_PARTY_NOTICES.md](https://github.com/bmw8080/laya-decision-api/blob/main/THIRD_PARTY_NOTICES.md) 与 `src/laya_api/static/swagger/`。
 Laya 决策模型本体是独立上游项目，**权重不随本仓库分发**。
