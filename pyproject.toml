@@ -1,17 +1,20 @@
 [project]
 name = "laya-decision-api"
 version = "1.0.1"
-description = "Laya 本地决策模型的服务化接口（契约 + 本地 HTTP 服务 + 薄客户端 + 阈值路由）"
+description = "Laya 本地决策模型的服务化接口：意图分类 / 工单分派 / LLM 路由 / 内容审核，离线零 token（契约 + HTTP 服务 + 客户端 + 阈值路由）"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"
-license = { text = "Apache-2.0" }
+# 注意：必须是 SPDX 字符串。旧的 `license = { text = "..." }` 表写在 setuptools ≥77 上直接构建失败
+license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "laya-decision-api contributors" }]
-keywords = ["laya", "decision", "system-1", "fastapi", "openapi", "mlx", "torch", "llm-router"]
+keywords = ["laya", "decision", "system-1", "fastapi", "openapi", "mlx", "torch", "llm-router",
+            "intent-classification", "triage", "content-moderation", "offline-inference",
+            "self-hosted", "inference-server", "structured-output"]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    # License 走 SPDX 表达式（license 字段），PEP 639 起不允许再留 License 分类器
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3 :: Only",

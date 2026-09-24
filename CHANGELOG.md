@@ -18,6 +18,11 @@
 - 新增 `.github/dependabot.yml`：pip 依赖与 GitHub Actions 版本每周/每月自动检查
 - 新增 `scripts/push-all.sh`：一条命令把分支与 tag 同时推到 GitHub 与 Gitee（防镜像仓库落后）
 
+### 修复
+- **pyproject 的 license 写法使包无法构建**（`license = { text = ... }` 表写 + License 分类器，setuptools ≥77 直接报错）
+  改为 SPDX 字符串 `license = "Apache-2.0"`、删掉 License 分类器；现已能构建 sdist/wheel 且 `twine check` 通过
+  —— 这是 PyPI 分发的前提，之前这条路是坏的
+
 ### 文档更新
 - README 增加「支持这个项目」（微信打赏码，自愿；不影响功能与 issue 优先级）
 - README 补充「国内直连拉取方式」：Docker Hub 不通时的加速站前缀（附镜像摘要核对口径；
