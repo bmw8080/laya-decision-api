@@ -158,6 +158,49 @@ curl -s localhost:8765/v1/decide -H 'content-type: application/json' \
 2. **「不确定」不是错误**：用低 `confidence` 表达，不抛异常、不回空值。
 3. **错误分层可编程**：按上表分支即可，不需要解析文本。
 
+## OpenAPI 文档档位（3.1 / 3.0 / 扁平档）
+
+> 三档（3.1 / 3.0 / 扁平档）怎么选、各自踩过什么坑，见 **[docs/openapi-profiles.md](docs/openapi-profiles.md)**。
+
+FastAPI 原生产出 **OpenAPI 3.1.0**，而部分企业 API 平台（API 网关 / API 管理 / Apifox 等）只认 **3.0.x**，
+导入时会报「无法读取 openapi 信息 / 版本不是 3.0.x」。本服务提供三个入口：
+
+| 入口 | 版本 | 用途 |
+|---|---|---|
+| `GET /openapi.json` | 由 `LAYA_OPENAPI_VERSION` 决定（默认 `3.1`） | 默认 3.1；设成 `3.0` 后连同 `/docs`、`/redoc` 一起切成 3.0.3 |
+| `GET /openapi-3.0.json` | **固定 3.0.3** | 给只认 3.0.x 的平台导入（推荐直接用这个 URL） |
+| `GET /openapi-kingdee.json` | **3.0.3 + 彻底扁平** | 自研 schema 转换器（如金蝶苍穹）会因 `$ref`/`allOf`/`anyOf` 抛 NPE，这一档全部摊平 |
+| `python -m laya_api.openapi30 > openapi-3.0.json` | 3.0.3 | 平台只支持"上传文件"时，导出文件再上传 |
+| `python -m laya_api.openapi30 --profile kingdee > openapi-kingdee.json` | 3.0.3 扁平 | 同上，但要喂给自研转换器时用这一档 |
+
+降级做了这些改写（都是 3.1 → 3.0 的差异）：`type: "null"` → `nullable: true`、schema 级
+`examples: [...]` → `example:`、`const` → `enum`、数值型 `exclusiveMinimum/Maximum` → 布尔开关 +
+`minimum/maximum`、`$ref` 带兄弟键 → `allOf` 包装、删除 3.0 不认识的关键字
+（`prefixItems`/`patternProperties`/`contentMediaType`…）与顶层 `jsonSchemaDialect`/`webhooks`；
+并补齐 `servers` 与缺失的 `operationId`。
+
+```bash
+# 直接给平台填这个地址
+http://<服务地址>:8765/openapi-3.0.json
+
+# 或导出文件上传（servers 想写死成真实地址就设 LAYA_OPENAPI_SERVER_URL）
+LAYA_OPENAPI_SERVER_URL=http://10.0.0.5:8765 python -m laya_api.openapi30 > openapi-3.0.json
+```
+
+> 校验口径：本仓库的契约测试里用 `openapi-spec-validator` 的 **3.0 专用校验器**验过 ——
+> 未降级的 3.1 文档会被它拒（`'3.1.0' does not match '^3\.0\.\d(-.+)?$'`，即平台报的那句），
+> 降级后的 3.0.3 文档通过。
+
+**扁平化档（`/openapi-kingdee.json`）解决的是另一类问题**：某些自研转换器（金蝶苍穹
+`JsonSchemaToParamDefinitionConverter.convertSchema` 实测）遇到 `$ref`、`allOf`、`anyOf`、或**没有 `type`
+的 schema 节点**会直接 `NullPointerException`。这一档在 3.0.3 基础上再摊平：
+
+- **内联全部 `$ref`**（带环保护，递归引用用占位对象表示）
+- **消掉 `allOf`/`anyOf`/`oneOf`**：`allOf` 合并；联合类型取"信息最全"的一支，语义差异写进 `description`
+- **每个 schema 节点都带 `type`**（原来 `state: Any` 这类无 type 的字段会被推断成 `object` 并补 `additionalProperties`）
+- 布尔型 `additionalProperties` 归一化为对象；`title`/`description`/`enum`/`example`/`default` 等仍保留（数据原样，不做 schema 化）
+- 仍是合法 3.0.3（过了 3.0 专用校验器），端点与模型一个不少
+
 ## 三种问法怎么用
 
 | 语义 | 一句话 | 典型业务 | 问法 |
@@ -216,10 +259,6 @@ npx -p typescript@5.9.2 tsc --noEmit -p sdk/ts
 | `LAYA_AUTH_PUBLIC_PATHS` | healthz/readyz/docs/redoc/wiki/ui/openapi/static | 公开路径白名单 |
 | `LAYA_RATE_LIMIT_PER_MIN` / `_BURST` | `0`（不限流） | 按密钥令牌桶限流，超限 `429` + `Retry-After` |
 
-实测（独立实例，`api_key` + 3/分钟）：健康检查 200；无密钥 401；错密钥 401；正确密钥 200；
-超出后 `429` 且带 `Retry-After: 19`；错误体 `{"error":{"code":"RATE_LIMITED","details":{"retry_after_s":18.49}}}`。
-密钥用 `hmac.compare_digest` 比较（防时序侧信道），日志与状态里只出现密钥的 SHA-256 前 8 位指纹。
-
 ### 性能
 
 | 变量 | 默认 | 说明 |
@@ -256,9 +295,6 @@ bash scripts/deploy.sh                    # 改完源码后同步运行副本 + 
 bash scripts/uninstall-service.sh         # 卸载（回滚）
 # 日志：~/Library/Logs/laya-decision-api/service.{out,err}.log
 ```
-
-实测验收：`/healthz` → `{"status":"ok","ready":true,...}`；`/readyz?warm=1` → `loaded:["mlx/multilingual"]`；
-连发多次 `queue_wait` 0.01–0.04 ms；choice 标签重复 → HTTP 400 `SCHEMA_INVALID`。
 
 > **launchd 读不到外置卷（实测踩过）**：若源码放在可移动卷 / 外置盘，macOS 的用户级 LaunchAgent
 > 没有该卷的访问权限，直接跑会报 `Operation not permitted`。因此常驻服务跑的是
@@ -329,10 +365,8 @@ curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multi
 docker pull docker.1panel.live/bmw8080/laya-decision-api:1.0.1
 docker pull docker.1ms.run/bmw8080/laya-decision-api:1.0.1     # 需要 token，docker CLI 自动处理
 
-docker tag docker.1panel.live/bmw8080/laya-decision-api:1.0.1 bmw8080/laya-decision-api:1.0.1
-docker run -d --name laya-api -p 8765:8765 \
-  -e LAYA_AUTH_MODE=api_key -e LAYA_API_KEYS=替换成你的密钥 \
-  bmw8080/laya-decision-api:1.0.1
+docker tag docker.1panel.live/bmw8080/laya-decision-api:1.0.1 bmw8080/laya-decision-api:1.0.1   # 还原成原名
+# 之后按上一节的 docker run 起容器即可
 ```
 
 - 加速站是第三方公益镜像，随时可能失效或加白名单限制。反例：`docker.m.daocloud.io` 明确拒绝拉取本项目镜像
@@ -340,49 +374,6 @@ docker run -d --name laya-api -p 8765:8765 \
 - 拉完想确认拉到的确实是官方那份，核对镜像摘要：`1.0.1` / `latest` 当前为
   `sha256:64f5e6c38415ab27…`（linux/amd64、15 层、约 922 MB）。
   查法：`docker pull` 的输出里会打印 Digest，或 `docker image inspect --format '{{index .RepoDigests 0}}' bmw8080/laya-decision-api:1.0.1`。
-
-### 给只认 OpenAPI 3.0 的平台导入
-
-> 三档（3.1 / 3.0 / 扁平档）怎么选、各自踩过什么坑，见 **[docs/openapi-profiles.md](docs/openapi-profiles.md)**。
-
-FastAPI 原生产出 **OpenAPI 3.1.0**，而部分企业 API 平台（API 网关 / API 管理 / Apifox 等）只认 **3.0.x**，
-导入时会报「无法读取 openapi 信息 / 版本不是 3.0.x」。本服务提供三个入口：
-
-| 入口 | 版本 | 用途 |
-|---|---|---|
-| `GET /openapi.json` | 由 `LAYA_OPENAPI_VERSION` 决定（默认 `3.1`） | 默认 3.1；设成 `3.0` 后连同 `/docs`、`/redoc` 一起切成 3.0.3 |
-| `GET /openapi-3.0.json` | **固定 3.0.3** | 给只认 3.0.x 的平台导入（推荐直接用这个 URL） |
-| `GET /openapi-kingdee.json` | **3.0.3 + 彻底扁平** | 自研 schema 转换器（如金蝶苍穹）会因 `$ref`/`allOf`/`anyOf` 抛 NPE，这一档全部摊平 |
-| `python -m laya_api.openapi30 > openapi-3.0.json` | 3.0.3 | 平台只支持"上传文件"时，导出文件再上传 |
-| `python -m laya_api.openapi30 --profile kingdee > openapi-kingdee.json` | 3.0.3 扁平 | 同上，但要喂给自研转换器时用这一档 |
-
-降级做了这些改写（都是 3.1 → 3.0 的差异）：`type: "null"` → `nullable: true`、schema 级
-`examples: [...]` → `example:`、`const` → `enum`、数值型 `exclusiveMinimum/Maximum` → 布尔开关 +
-`minimum/maximum`、`$ref` 带兄弟键 → `allOf` 包装、删除 3.0 不认识的关键字
-（`prefixItems`/`patternProperties`/`contentMediaType`…）与顶层 `jsonSchemaDialect`/`webhooks`；
-并补齐 `servers` 与缺失的 `operationId`。
-
-```bash
-# 直接给平台填这个地址
-http://<服务地址>:8765/openapi-3.0.json
-
-# 或导出文件上传（servers 想写死成真实地址就设 LAYA_OPENAPI_SERVER_URL）
-LAYA_OPENAPI_SERVER_URL=http://10.0.0.5:8765 python -m laya_api.openapi30 > openapi-3.0.json
-```
-
-> 校验口径：本仓库的契约测试里用 `openapi-spec-validator` 的 **3.0 专用校验器**验过 ——
-> 未降级的 3.1 文档会被它拒（`'3.1.0' does not match '^3\.0\.\d(-.+)?$'`，即平台报的那句），
-> 降级后的 3.0.3 文档通过。
-
-**扁平化档（`/openapi-kingdee.json`）解决的是另一类问题**：某些自研转换器（金蝶苍穹
-`JsonSchemaToParamDefinitionConverter.convertSchema` 实测）遇到 `$ref`、`allOf`、`anyOf`、或**没有 `type`
-的 schema 节点**会直接 `NullPointerException`。这一档在 3.0.3 基础上再摊平：
-
-- **内联全部 `$ref`**（带环保护，递归引用用占位对象表示）
-- **消掉 `allOf`/`anyOf`/`oneOf`**：`allOf` 合并；联合类型取"信息最全"的一支，语义差异写进 `description`
-- **每个 schema 节点都带 `type`**（原来 `state: Any` 这类无 type 的字段会被推断成 `object` 并补 `additionalProperties`）
-- 布尔型 `additionalProperties` 归一化为对象；`title`/`description`/`enum`/`example`/`default` 等仍保留（数据原样，不做 schema 化）
-- 仍是合法 3.0.3（过了 3.0 专用校验器），端点与模型一个不少
 
 ### 构建期参数（`--build-arg`）与运行期环境变量
 
@@ -484,11 +475,11 @@ PLATFORM=linux/amd64 PIP_FLAGS=--no-compile \
   bash scripts/docker-build.sh laya-decision-api:1.0.1-amd64
 ```
 
-实测数据（arm64 机器上跨构建 x86_64）见下方「交付记录」；构建耗时受 QEMU 与网络影响大。
-
 > 若 `deb.debian.org` 在你的网络里被中间设备干扰（构建时报 `Clearsigned file isn't valid, got 'NOSPLIT'`），
 > 用 `DEBIAN_MIRROR` 换源：`bash scripts/docker-build.sh <tag> --build-arg DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn`
 > （`scripts/docker-build.sh` 已默认传清华源，`DEBIAN_MIRROR="" ` 可关掉走官方源）。
+
+> **QEMU 下的耗时不代表 x86_64 原生性能**（模拟层慢两个数量级）；要真实性能只能在 x86_64 上原生跑。
 
 **一条命令打包（在 Ubuntu VM / x86 构建机上跑）**：
 
@@ -511,11 +502,6 @@ bash scripts/fetch-weights.sh /opt/laya-models     # 或解包一起拷过来的
 cp .env.docker.example .env.docker && bash scripts/docker-run.sh laya-decision-api:1.0.1
 curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
 ```
-
-> **哪些是实测、哪些不是**（避免误读）：镜像构建、`docker load`、容器内权重加载与一次真实判定，
-> 都已在 arm64 VM 上跑过（跨架构构建成 linux/amd64，QEMU 模拟执行），见下方「交付记录」；
-> 但 **QEMU 下的耗时数字不代表 x86_64 原生性能**（模拟层慢两个数量级）。
-> 本机（Apple Silicon，无 Docker）只跑了前台 / launchd 形态。
 
 ### 后端对照（同一份 safetensors 权重，各形态共用）
 
@@ -576,23 +562,6 @@ HTTP 端点（httpx `ASGITransport`）、鉴权与限流、离线文档守门（
 
 欢迎提 issue / PR。约定见 **[CONTRIBUTING.md](CONTRIBUTING.md)**，行为准则见 **[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md)**，
 安全问题走 **[SECURITY.md](SECURITY.md)**（不要开公开 issue）。变更记录见 [CHANGELOG.md](CHANGELOG.md)。
-
-## 交付记录（实测）
-
-在 arm64 Ubuntu VM（2 vCPU / 4GB，Docker 28.0.4 + buildx 0.22，已注册 QEMU amd64）上跨架构构建 `linux/amd64`：
-
-| 项 | 结果 |
-|---|---|
-| 构建耗时 | 构建缓存命中约 7 分钟；冷缓存（要下 torch 轮子）25–35 分钟 |
-| 镜像 | 解包 1.76GB（15 层）；`docker save \| gzip` 后交付包 902MB |
-| 镜像架构 | `linux/amd64`（构建机是 arm64，靠 `PLATFORM=linux/amd64` + QEMU） |
-| 容器内自检 | `/healthz` 200；权重加载成功 `loaded:["laya_torch/multilingual"]` |
-| 容器内真判定 | 返回 `choice` + 概率分布 + `confidence`，`request_id` 原样回显 |
-| 三档文档 | `/openapi.json` 3.1 ｜ `/openapi-3.0.json` 3.0.3 ｜ `/openapi-kingdee.json` 3.0.3 扁平（`required` 残留 0） |
-| 交付包校验 | `sha256sum -c` 通过，跨机二次校验一致 |
-
-> **QEMU 下的耗时不代表 x86_64 原生性能**：模拟层里模型加载 46–50 秒、单次判定约 12 秒；
-> 同一份权重在 arm64 宿主（MLX 形态）上热调用是 8–22 毫秒。要在 x86 上看真实性能，只能在 x86 上原生跑。
 
 ## 许可证
 
