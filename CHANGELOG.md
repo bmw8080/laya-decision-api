@@ -22,6 +22,7 @@
 - README 增加「支持这个项目」（微信打赏码，自愿；不影响功能与 issue 优先级）
 - README 补充「国内直连拉取方式」：Docker Hub 不通时的加速站前缀（附镜像摘要核对口径；
   实测两条前缀返回的摘要与 Docker Hub 完全一致），并点名 `docker.m.daocloud.io` 对本项目有白名单限制
+- README 顶部新增「最快上手」：Docker 一行命令 + 源码一行命令；徽章补 Docker Pulls
 - README 结构整理：过程记录（原「交付记录（实测）」小节、实测口径自述、本机验收流水）移出仓库，
   只保留结论与关键数字；「OpenAPI 三档」从「部署」下提为独立章节；合并重复的 `docker run` 片段
 - 新增 **docs/openapi-profiles.md**：OpenAPI 三档（3.1 / 3.0 / 扁平档）对照、各自改写了什么、

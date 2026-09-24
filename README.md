@@ -2,6 +2,7 @@
 
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![CI](https://github.com/bmw8080/laya-decision-api/actions/workflows/ci.yml/badge.svg)](https://github.com/bmw8080/laya-decision-api/actions/workflows/ci.yml)
+[![Docker Pulls](https://img.shields.io/docker/pulls/bmw8080/laya-decision-api)](https://hub.docker.com/r/bmw8080/laya-decision-api)
 [![Python](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](pyproject.toml)
 [![OpenAPI](https://img.shields.io/badge/OpenAPI-3.1-6ba539.svg)](contract/decision.v1.schema.json)
 
@@ -13,6 +14,24 @@
 > (Python / Java / TypeScript), offline OpenAPI 3.1 docs, env-driven auth & rate limiting.
 > Apache-2.0. See [docs/sdk.md](docs/sdk.md) and [docs/api-semantics.md](docs/api-semantics.md).
 > Tipping is welcome but never required (see 支持这个项目 at the bottom).
+
+## 最快上手
+
+**Docker（镜像自带权重，起容器即用）**
+
+```bash
+docker run -d --name laya-api -p 8765:8765 bmw8080/laya-decision-api:1.0.1
+curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
+```
+
+**源码（macOS，走 MLX，更快）**
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -e ".[test]" && bash scripts/run.sh
+```
+
+打开 `http://127.0.0.1:8765/` 是内置测试台（零构建、离线）；`/docs` 是 Swagger UI，`/wiki` 是接口参考。
+镜像标签与架构、国内拉取、自己构建与跨架构交付：见 **[部署](#部署)**；源码方式的完整步骤见 **[快速开始（源码方式）](#快速开始源码方式)**。
 
 ## 特性
 
@@ -51,7 +70,9 @@ laya-decision-api/
 └── scripts/                         # 起服务 / 部署 / launchd / 容器
 ```
 
-## 快速开始
+## 快速开始（源码方式）
+
+> 只想跑起来、不想建环境：用上面「最快上手」里的 Docker 一行命令；容器细节见 **[部署](#部署)**。
 
 ```bash
 python3 -m venv .venv
