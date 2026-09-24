@@ -30,5 +30,15 @@ for f in model.safetensors rl_agent_config.json encoder/config.json; do
   fi
 done
 
-echo "[entrypoint] 权重就绪，启动服务（单 worker）"
+echo "[entrypoint] 权重就绪"
+
+# 没有显式命令时，按环境变量拉起服务（端口/监听地址/worker 数都可赋值）
+#   必须单 worker：模型单例常驻，多 worker 各自加载一份权重
+if [ "$#" -eq 0 ]; then
+  set -- python -m uvicorn laya_api.server:app \
+      --host "${LAYA_API_HOST:-0.0.0.0}" \
+      --port "${LAYA_API_PORT:-8765}" \
+      --workers "${LAYA_WORKERS:-1}"
+  echo "[entrypoint] 启动：$* （engine=${LAYA_ENGINE:-laya_torch} model=${LAYA_MODEL:-multilingual}）"
+fi
 exec "$@"

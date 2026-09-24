@@ -294,6 +294,72 @@ def main() -> int:
                 for field in ("state", "questions", "policy"):
                     assert props[field].get("description"), f"{field} 缺 description（文档会空）"
                 assert schemas["Question"]["properties"]["type"].get("enum") == ["choice", "score", "noul"]
+
+                # ── OpenAPI 3.0.3 降级文档：给只认 3.0.x 的平台导入（3.1 的 type:null / examples 数组都要降级）──
+                oa30 = await c.get("/openapi-3.0.json")
+                assert oa30.status_code == 200, oa30.text
+                d30 = oa30.json()
+                assert d30["openapi"] == "3.0.3", d30["openapi"]
+                assert sorted(d30["paths"]) == sorted(doc["paths"]), "3.0 文档丢了端点"
+                assert sorted(d30["components"]["schemas"]) == sorted(doc["components"]["schemas"]), "3.0 文档丢了模型"
+                t30 = json.dumps(d30, ensure_ascii=False)
+                assert '"type": "null"' not in t30, "3.1 的 type:null 未降级为 nullable"
+                assert '"examples": [' not in t30, "3.1 的 schema 级 examples 未降级为 example"
+                assert '"const"' not in t30, "const 未降级为 enum"
+                assert d30.get("servers"), "3.0 文档缺 servers（部分平台必需）"
+                for _p, _ms in d30["paths"].items():
+                    for _m, _op in _ms.items():
+                        if _m in ("get", "post", "put", "delete", "patch"):
+                            assert _op.get("operationId"), f"{_m.upper()} {_p} 缺 operationId（部分平台导入时必需）"
+                try:  # 装了真校验器就按 3.0 规范校验（可选依赖）
+                    from openapi_spec_validator import OpenAPIV30SpecValidator
+                    OpenAPIV30SpecValidator(d30).validate()
+                except ImportError:
+                    pass
+
+                # ── 苍穹档（再扁平一层）：无 $ref / 无 allOf·anyOf·oneOf / 每个 schema 节点都有 type ──
+                kdresp = await c.get("/openapi-kingdee.json")
+                assert kdresp.status_code == 200, kdresp.text
+                kd = kdresp.json()
+                assert kd["openapi"] == "3.0.3", kd["openapi"]
+                tk = json.dumps(kd, ensure_ascii=False)
+                for bad_kw in ('"$ref"', '"allOf"', '"anyOf"', '"oneOf"'):
+                    assert bad_kw not in tk, f"扁平化档仍残留 {bad_kw}（自研转换器会 NPE）"
+                _miss: list = []
+
+                def _scan(_n, _p=""):
+                    if isinstance(_n, dict):
+                        if any(x in _n for x in ("type", "properties", "items", "enum", "additionalProperties")) and "type" not in _n:
+                            _miss.append(_p)
+                        for _k, _v in _n.items():
+                            _scan(_v, f"{_p}.{_k}")
+                    elif isinstance(_n, list):
+                        for _i, _v in enumerate(_n):
+                            _scan(_v, f"{_p}[{_i}]")
+
+                _scan(kd)
+                assert not _miss, f"扁平化档有节点缺 type：{_miss[:3]}"
+                # example 必须是数据，不能是被压成 schema 的形状
+                _bad_ex = json.dumps(kd, ensure_ascii=False).count('"example": {\n            "type": "object"')
+                assert _bad_ex == 0, "example 被误处理成 schema"
+                assert '"required": [' not in tk, "扁平化档仍带 required 数组（苍穹会报 can not cast to boolean）"
+                try:
+                    from openapi_spec_validator import OpenAPIV30SpecValidator
+                    OpenAPIV30SpecValidator(kd).validate()
+                except ImportError:
+                    pass
+
+                # LAYA_OPENAPI_VERSION=3.0 时，/openapi.json（含 /docs、/redoc）整体切成 3.0.3
+                import os as _os
+                from laya_api import settings as _S
+                _os.environ["LAYA_OPENAPI_VERSION"] = "3.0"
+                _S.reload_from_env()
+                try:
+                    sw = await c.get("/openapi.json")
+                    assert sw.json()["openapi"] == "3.0.3", sw.json()["openapi"]
+                finally:
+                    _os.environ.pop("LAYA_OPENAPI_VERSION", None)
+                    _S.reload_from_env()
                 assert "加载状态" in ui.text or "ready=" in ui.text
                 h = await c.get("/healthz")
                 assert h.status_code == 200, h.text

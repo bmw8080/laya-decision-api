@@ -1,6 +1,6 @@
 {
   "name": "laya-client",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Laya 决策服务 TypeScript 客户端（零依赖，fetch 实现）",
   "type": "module",
   "main": "laya-client.ts",

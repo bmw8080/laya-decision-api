@@ -61,9 +61,19 @@ async def lifespan(_app: FastAPI):
     yield
 
 
+def _pkg_version() -> str:
+    """发布版本以 pyproject.toml 为唯一来源；取不到时回落到内置值。"""
+    try:
+        from importlib.metadata import version as _dist_version
+
+        return _dist_version("laya-decision-api")
+    except Exception:
+        return "1.0.1"
+
+
 app = FastAPI(
     title="Laya 决策服务",
-    version="1.0.0",
+    version=_pkg_version(),
     description=(
         "本地 System-1 决策模型的 HTTP 服务：交「情境 + 问题」，回「结论 + 把握程度」。\n\n"
         "三种问法 choice / score / noul；读结果只看两项 —— 结论与 confidence（≥τ 自动处理，<τ 转人工）。\n\n"
@@ -75,6 +85,47 @@ app = FastAPI(
     docs_url=None,
     redoc_url=None,
 )
+
+# ── OpenAPI 版本：默认 3.1（FastAPI 原生）；LAYA_OPENAPI_VERSION=3.0 时对外降级为 3.0.3 ──
+# 为什么要降级：不少企业 API 平台只认 3.0.x，读到 3.1 会报「无法读取 openapi 信息 / 版本不是 3.0.x」。
+# 无论开关怎么设，专门的 /openapi-3.0.json 始终可用（固定 3.0.3，给平台导入用）。
+_native_openapi = app.openapi
+
+
+def _openapi_with_version() -> dict:
+    doc = _native_openapi()
+    cfg = settings.get()
+    if str(cfg.openapi_version).startswith("3.0"):
+        from .openapi30 import to_openapi_30
+        return to_openapi_30(doc, server_url=cfg.openapi_server_url or None)
+    return doc
+
+
+app.openapi = _openapi_with_version
+
+
+@app.get("/openapi-3.0.json", tags=["ops"], summary="OpenAPI 3.0.3 文档（给只认 3.0.x 的平台导入）",
+         include_in_schema=False)
+def openapi_30_json() -> JSONResponse:
+    from .openapi30 import to_openapi_30
+    cfg = settings.get()
+    doc = to_openapi_30(_native_openapi(), server_url=cfg.openapi_server_url or None)
+    return JSONResponse(content=doc, media_type="application/json")
+
+
+@app.get("/openapi-kingdee.json", tags=["ops"],
+         summary="OpenAPI 3.0.3 扁平化档（给金蝶苍穹等自研 schema 转换器用）",
+         include_in_schema=False)
+def openapi_kingdee_json() -> JSONResponse:
+    """彻底摊平：内联全部 $ref、消掉 allOf/anyOf/oneOf、每个节点都带 type。
+
+    苍穹的 JsonSchemaToParamDefinitionConverter 对 $ref/复合关键字会抛 NPE，这一档就是给它用的。
+    """
+    from .openapi30 import to_kingdee_profile
+    cfg = settings.get()
+    doc = to_kingdee_profile(_native_openapi(), server_url=cfg.openapi_server_url or None)
+    return JSONResponse(content=doc, media_type="application/json")
+
 
 # 本地托管的 swagger-ui / redoc 静态资源（随包发布：src/laya_api/static/swagger/）
 _STATIC_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "static")

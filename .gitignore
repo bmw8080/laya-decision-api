@@ -18,6 +18,11 @@ node_modules/
 out/
 *.tsbuildinfo
 
+# 构建用权重目录（644MB，绝不入库；只保留占位文件）
+weights/*
+!weights/.gitkeep
+!weights/README.md
+
 # 模型权重（644MB，绝不入库）
 *.safetensors
 *.npz

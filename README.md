@@ -268,15 +268,108 @@ builder(python:3.12-slim) ──pip→ /install ──┐
 | 有网机器构建后 `docker save` → 服务器 `docker load` | 服务器完全离线 | 同上 | 内网 / 离线交付 |
 
 ```bash
-bash scripts/fetch-weights.sh /opt/laya-models      # ModelScope 国内直连，644MB
+# 权重打进镜像（单文件交付，默认）：先放进构建上下文 weights/
+bash scripts/fetch-weights.sh ./weights             # ModelScope 国内直连 644MB；已有权重直接 cp 进 weights/multilingual 也行
 bash scripts/docker-build.sh laya-decision-api:uat  # 默认清华 PyPI + torch CPU 索引
 cp .env.docker.example .env.docker
-bash scripts/docker-run.sh laya-decision-api:uat    # 挂 /opt/laya-models:ro，只监听 127.0.0.1:8765
+bash scripts/docker-run.sh laya-decision-api:uat    # 镜像自带权重，无需挂载；只监听 127.0.0.1:8765
 
 # 验证
 docker run --rm laya-decision-api:uat python -c "import laya, fastapi, uvicorn; print('deps ok')"
 curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/multilingual"]
 ```
+
+**权重进不进镜像两种形态**（按交付方式选）：
+
+| 形态 | 做法 | 结果 |
+|---|---|---|
+| 单文件交付（默认） | 构建前把权重放进 `weights/`（`COPY weights/ /models/`） | `docker load` 后直接 `docker run` 就能起，不依赖宿主目录；镜像 +644MB |
+| 瘦身 / 权重外置 | `weights/` 只留 `.gitkeep` 再构建 | 镜像小 644MB；运行时挂载：`LAYA_MOUNT_MODELS=1 bash scripts/docker-run.sh <tag>` |
+
+> 镜像内权重目录是 `/models/<model>`（默认 `/models/multilingual`）。Dockerfile 里**没用 `VOLUME` 声明**
+> —— 声明了会在运行时生成匿名卷遮蔽镜像内的权重，反而变成"看起来没权重"。
+
+### 给只认 OpenAPI 3.0 的平台导入
+
+FastAPI 原生产出 **OpenAPI 3.1.0**，而部分企业 API 平台（API 网关 / API 管理 / Apifox 等）只认 **3.0.x**，
+导入时会报「无法读取 openapi 信息 / 版本不是 3.0.x」。本服务提供三个入口：
+
+| 入口 | 版本 | 用途 |
+|---|---|---|
+| `GET /openapi.json` | 由 `LAYA_OPENAPI_VERSION` 决定（默认 `3.1`） | 默认 3.1；设成 `3.0` 后连同 `/docs`、`/redoc` 一起切成 3.0.3 |
+| `GET /openapi-3.0.json` | **固定 3.0.3** | 给只认 3.0.x 的平台导入（推荐直接用这个 URL） |
+| `GET /openapi-kingdee.json` | **3.0.3 + 彻底扁平** | 自研 schema 转换器（如金蝶苍穹）会因 `$ref`/`allOf`/`anyOf` 抛 NPE，这一档全部摊平 |
+| `python -m laya_api.openapi30 > openapi-3.0.json` | 3.0.3 | 平台只支持"上传文件"时，导出文件再上传 |
+| `python -m laya_api.openapi30 --profile kingdee > openapi-kingdee.json` | 3.0.3 扁平 | 同上，但要喂给自研转换器时用这一档 |
+
+降级做了这些改写（都是 3.1 → 3.0 的差异）：`type: "null"` → `nullable: true`、schema 级
+`examples: [...]` → `example:`、`const` → `enum`、数值型 `exclusiveMinimum/Maximum` → 布尔开关 +
+`minimum/maximum`、`$ref` 带兄弟键 → `allOf` 包装、删除 3.0 不认识的关键字
+（`prefixItems`/`patternProperties`/`contentMediaType`…）与顶层 `jsonSchemaDialect`/`webhooks`；
+并补齐 `servers` 与缺失的 `operationId`。
+
+```bash
+# 直接给平台填这个地址
+http://<服务地址>:8765/openapi-3.0.json
+
+# 或导出文件上传（servers 想写死成真实地址就设 LAYA_OPENAPI_SERVER_URL）
+LAYA_OPENAPI_SERVER_URL=http://10.0.0.5:8765 python -m laya_api.openapi30 > openapi-3.0.json
+```
+
+> 校验口径：本仓库的契约测试里用 `openapi-spec-validator` 的 **3.0 专用校验器**验过 ——
+> 未降级的 3.1 文档会被它拒（`'3.1.0' does not match '^3\.0\.\d(-.+)?$'`，即平台报的那句），
+> 降级后的 3.0.3 文档通过。
+
+**扁平化档（`/openapi-kingdee.json`）解决的是另一类问题**：某些自研转换器（金蝶苍穹
+`JsonSchemaToParamDefinitionConverter.convertSchema` 实测）遇到 `$ref`、`allOf`、`anyOf`、或**没有 `type`
+的 schema 节点**会直接 `NullPointerException`。这一档在 3.0.3 基础上再摊平：
+
+- **内联全部 `$ref`**（带环保护，递归引用用占位对象表示）
+- **消掉 `allOf`/`anyOf`/`oneOf`**：`allOf` 合并；联合类型取"信息最全"的一支，语义差异写进 `description`
+- **每个 schema 节点都带 `type`**（原来 `state: Any` 这类无 type 的字段会被推断成 `object` 并补 `additionalProperties`）
+- 布尔型 `additionalProperties` 归一化为对象；`title`/`description`/`enum`/`example`/`default` 等仍保留（数据原样，不做 schema 化）
+- 仍是合法 3.0.3（过了 3.0 专用校验器），端点与模型一个不少
+
+### 构建期参数（`--build-arg`）与运行期环境变量
+
+**优先级：运行期 `-e` / `--env-file` > 构建期 `--build-arg` > Dockerfile 默认值。**
+所以端口、鉴权密钥这类"部署时才定"的东西，优先用运行期注入，不必重建镜像。
+
+构建期可赋值的参数（全部有默认值，见 Dockerfile 顶部参数表）：
+
+| 参数 | 默认 | 说明 |
+|---|---|---|
+| `BASE_IMAGE` / `RUN_BASE_IMAGE` | `python:3.12-slim-bookworm` | 基础镜像（要预装 torch 就换 `pytorch/pytorch:*`） |
+| `APP_DIR` / `MODELS_DIR` | `/app` / `/models` | 镜像内应用目录 / 权重目录 |
+| `LAY_RUN_USER` / `LAY_RUN_UID` / `LAY_RUN_GID` | `app` / `1001` / `1001` | 运行用户（非 root） |
+| `LAYA_API_HOST` / `LAYA_API_PORT` | `0.0.0.0` / `8765` | 监听地址 / 端口 |
+| `LAYA_ENGINE` / `LAYA_MODEL` / `LAYA_BACKEND` | `laya_torch` / `multilingual` / `auto` | 引擎 / 模型 / 后端 |
+| `LAYA_MODEL_DIR` | `${MODELS_DIR}/${LAYA_MODEL}` | 权重目录（留空即用默认） |
+| `LAYA_WARM_ON_START` / `LAYA_PREFIX_CACHE` | `1` / `1` | 启动预热 / 前缀缓存 |
+| `LAYA_MAX_QUEUE` / `LAYA_DEFAULT_TIMEOUT_MS` / `LAYA_BUSY_RETRY_AFTER_S` | `16` / `5000` / `1` | 队列与超时 |
+| `LAY_MAX_STATE_CHARS` / `LAY_MAX_OPTIONS` | `4000` / `20` | 体积上限 |
+| `LAYA_AUTH_MODE` / `LAYA_API_KEYS` / `LAYA_AUTH_HEADER` / `LAYA_AUTH_PROTECT_STATUS` | `off` / 空 / `X-API-Key` / `0` | 鉴权 |
+| `LAYA_AUTH_PUBLIC_PATHS` / `LAYA_RATE_LIMIT_PER_MIN` / `LAYA_RATE_LIMIT_BURST` | 见 Dockerfile | 公开路径 / 限流 |
+| `PIP_INDEX_URL_BUILD` / `TORCH_INDEX_URL` / `DEBIAN_MIRROR` / `PIP_FLAGS` / `LAYA_PIP_SPEC` | 见 Dockerfile | 构建源与开关 |
+
+```bash
+# 例：换个端口与运行用户，同时把鉴权打开（密钥建议运行时给，别烤进镜像）
+LAY_API_PORT=9000 LAYA_RUN_UID=2000 LAYA_AUTH_MODE=api_key \
+  bash scripts/docker-build.sh laya-decision-api:1.0.1
+```
+
+⚠️ **密钥不要用 `--build-arg` 烤进镜像**：`--build-arg LAYA_API_KEYS=xxx` 会把值固化进镜像层
+（`docker history` / `docker inspect` 可见，推到镜像仓后收不回来）。正确做法是运行时注入：
+
+```bash
+# .env.docker 里写 LAYA_AUTH_MODE=api_key / LAYA_API_KEYS=xxx，然后
+bash scripts/docker-run.sh laya-decision-api:1.0.1          # 走 --env-file
+# 或临时指定
+docker run -d -e LAYA_API_KEYS=xxx -e LAYA_AUTH_MODE=api_key ... laya-decision-api:1.0.1
+```
+
+`scripts/docker-build.sh` 会把上面这些 `LAYA_*`（以及 `APP_DIR`/`MODELS_DIR`/`LAYA_RUN_*`）
+**设了的环境变量自动透传**成 `--build-arg`，并在日志里逐条打印（密钥显示为 `***`）。
 
 换基础镜像：`bash scripts/docker-build.sh <tag> --build-arg BASE_IMAGE=… --build-arg RUN_BASE_IMAGE=…`
 （标签请先在构建机 `docker pull` 确认存在）。
@@ -286,7 +379,7 @@ curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/mult
 | `src/`、`contract/`、`docker-entrypoint.sh` | 是 | 服务本体与契约 |
 | fastapi / uvicorn / pydantic / httpx | 是 | 见 `requirements-docker.txt` |
 | torch(CPU) + 上游 `laya` | 是 | 容器必须用 torch 后端：MLX 是 macOS + Metal 专属 |
-| 644MB 权重 | 否（挂载） | `-v /opt/laya-models:/models:ro`；要单文件交付就把权重 COPY 进去（镜像 +644MB） |
+| 644MB 权重 | **是（默认，构建时 COPY）** | 放 `weights/` 即打进镜像（单文件交付）；不想带就别放，运行时 `-v /opt/laya-models:/models:ro` 挂载 |
 
 反代：nginx **保留路径**（`proxy_pass http://127.0.0.1:8765;`，不带尾斜杠），`proxy_read_timeout` 给足。
 
@@ -313,12 +406,42 @@ curl -s 'localhost:8765/readyz?warm=1'              # 期望 loaded:["torch/mult
 > 服务器 CPU 需支持 **AVX2**（torch 官方 wheel 的编译前提）：`lscpu | grep -o avx2`。
 > 老 CPU 上要换源码编译版 torch。
 
+**torch 轮子从哪装（两个架构都是：用 PyTorch 官方 CPU 索引，别用 PyPI）**：
+
+| `TORCH_INDEX_URL` | 结果 |
+|---|---|
+| `https://download.pytorch.org/whl/cpu`（默认） | 装纯 CPU 版，无 CUDA 依赖 |
+| `https://mirror.sjtu.edu.cn/pytorch-wheels/cpu/` | **国内推荐**。同样是 PEP 503 索引、同样只有 CPU 版；实测官方索引的索引页能打开，但**真正的轮子托管在 `download-r2.pytorch.org`，该主机在国内不可达**（构建会报 `Could not find a version that satisfies the requirement torch (from versions: none)`） |
+| PyPI / PyPI 国内镜像 | **会拖 `nvidia-*` 整套 CUDA 包**（实测：aarch64 上装 torch 时 pip 开始下载 `nvidia-cudnn-cu13` 等；x86_64 同理），磁盘和下载量都翻好几倍 —— 不要用 |
+
+> 该索引在国内偶发连接不稳（`Temporary failure in name resolution`），Dockerfile 里三处 pip 都加了
+> `--retries 10 --timeout 60` 兜底。
+
+**跨架构构建（在 arm64 机器上产出 x86_64 镜像）**：
+
+```bash
+# 1) 先注册 QEMU 处理器（只需一次；Docker Hub 不通就用镜像站前缀）
+docker run --privileged --rm docker.m.daocloud.io/tonistiigi/binfmt --install amd64
+
+# 2) 跨架构构建（QEMU 模拟，慢；--no-compile 跳过字节码编译可明显提速）
+PLATFORM=linux/amd64 PIP_FLAGS=--no-compile \
+  BASE_IMAGE=docker.m.daocloud.io/library/python:3.12-slim-bookworm \
+  RUN_BASE_IMAGE=docker.m.daocloud.io/library/python:3.12-slim-bookworm \
+  bash scripts/docker-build.sh laya-decision-api:1.0.1-amd64
+```
+
+实测数据（arm64 机器上跨构建 x86_64）：见 `CHANGELOG` 与本文档末尾的交付记录；构建耗时受 QEMU 与网络影响大。
+
+> 若 `deb.debian.org` 在你的网络里被中间设备干扰（构建时报 `Clearsigned file isn't valid, got 'NOSPLIT'`），
+> 用 `DEBIAN_MIRROR` 换源：`bash scripts/docker-build.sh <tag> --build-arg DEBIAN_MIRROR=https://mirrors.tuna.tsinghua.edu.cn`
+> （`scripts/docker-build.sh` 已默认传清华源，`DEBIAN_MIRROR="" ` 可关掉走官方源）。
+
 **一条命令打包（在 Ubuntu VM / x86 构建机上跑）**：
 
 ```bash
-bash scripts/docker-ship.sh laya-decision-api:1.0.0 ./dist
+bash scripts/docker-ship.sh laya-decision-api:1.0.1 ./dist
 # 顺带把 644MB 权重也打包（目标服务器不能上 ModelScope 时）：
-WITH_WEIGHTS=1 bash scripts/docker-ship.sh laya-decision-api:1.0.0 ./dist
+WITH_WEIGHTS=1 bash scripts/docker-ship.sh laya-decision-api:1.0.1 ./dist
 ```
 
 它会依次做：环境自检（架构 / docker / buildx / 磁盘）→ 构建 → **镜像内真实 import 自检** →
@@ -327,11 +450,11 @@ WITH_WEIGHTS=1 bash scripts/docker-ship.sh laya-decision-api:1.0.0 ./dist
 **目标服务器上**：
 
 ```bash
-sha256sum -c laya-decision-api-amd64-1.0.0.tar.gz.sha256
-docker load < laya-decision-api-amd64-1.0.0.tar.gz
-docker image inspect laya-decision-api:1.0.0 --format '{{.Os}}/{{.Architecture}}'   # 应为 linux/amd64
+sha256sum -c laya-decision-api-1.0.1-amd64.tar.gz.sha256
+docker load < laya-decision-api-1.0.1-amd64.tar.gz
+docker image inspect laya-decision-api:1.0.1 --format '{{.Os}}/{{.Architecture}}'   # 应为 linux/amd64
 bash scripts/fetch-weights.sh /opt/laya-models     # 或解包一起拷过来的权重包
-cp .env.docker.example .env.docker && bash scripts/docker-run.sh laya-decision-api:1.0.0
+cp .env.docker.example .env.docker && bash scripts/docker-run.sh laya-decision-api:1.0.1
 curl -s 'http://127.0.0.1:8765/readyz?warm=1'      # 期望 loaded:["torch/multilingual"]
 ```
 

@@ -79,6 +79,10 @@ class Settings:
     prefix_cache: bool = True               # 缓存问题前缀，重复问题集更快（实测 ~6%）
     warm_on_start: bool = True
 
+    # 文档（部分企业平台只认 OpenAPI 3.0.x；这里可切默认对外版本）
+    openapi_version: str = "3.1"            # 3.1（FastAPI 原生）| 3.0（降级为 3.0.3，兼容老平台）
+    openapi_server_url: str = ""            # 文档里的 servers[0].url，留空则用相对路径 "/"
+
     # 并发与超时
     max_queue: int = 16                     # 超过直接 BUSY，避免无限堆积
     default_timeout_ms: int = 5000          # 请求未指定时的默认超时
@@ -105,6 +109,8 @@ def load() -> Settings:
         model_dir=os.getenv("LAYA_MODEL_DIR", "").strip(),
         prefix_cache=_flag("LAYA_PREFIX_CACHE", True),
         warm_on_start=_flag("LAYA_WARM_ON_START", True),
+        openapi_version=os.getenv("LAYA_OPENAPI_VERSION", "3.1").strip() or "3.1",
+        openapi_server_url=os.getenv("LAYA_OPENAPI_SERVER_URL", "").strip(),
         max_queue=_int("LAYA_MAX_QUEUE", 16),
         default_timeout_ms=_int("LAYA_DEFAULT_TIMEOUT_MS", 5000),
         busy_retry_after_s=_int("LAYA_BUSY_RETRY_AFTER_S", 1),

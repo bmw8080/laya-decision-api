@@ -21,11 +21,21 @@ esac
 PLATFORM_ARGS=()
 [ -n "$PLATFORM" ] && PLATFORM_ARGS=(--platform "$PLATFORM")
 
+# 权重：镜像里已自带（构建时 COPY weights/ /models/）。若用的是"瘦身镜像"（构建时没放权重），
+# 用 LAYA_MOUNT_MODELS=1 走宿主机只读挂载。
+MOUNT_ARGS=()
+if [ "${LAYA_MOUNT_MODELS:-0}" = "1" ]; then
+  MOUNT_ARGS=(-v "$MODELS:/models:ro")
+  echo "  权重来源：宿主机挂载 $MODELS → /models（只读）"
+else
+  echo "  权重来源：镜像内置（如需挂载请设 LAYA_MOUNT_MODELS=1）"
+fi
+
 docker rm -f "$NAME" >/dev/null 2>&1 || true
 docker run -d --name "$NAME" --restart unless-stopped \
   "${PLATFORM_ARGS[@]}" \
+  "${MOUNT_ARGS[@]}" \
   --env-file "$ROOT/.env.docker" \
-  -v "$MODELS:/models:ro" \
   -p "127.0.0.1:$PORT:$PORT" \
   "$TAG"
 

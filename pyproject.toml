@@ -1,6 +1,6 @@
 [project]
 name = "laya-decision-api"
-version = "1.0.0"
+version = "1.0.1"
 description = "Laya 本地决策模型的服务化接口（契约 + 本地 HTTP 服务 + 薄客户端 + 阈值路由）"
 readme = "README.md"
 requires-python = ">=3.11,<3.14"

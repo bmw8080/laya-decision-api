@@ -6,14 +6,16 @@
 #
 # 用法：
 #   bash scripts/docker-ship.sh [TAG] [输出目录]
-#   PLATFORM=linux/amd64 bash scripts/docker-ship.sh laya-decision-api:1.0.0 ./dist
+#   PLATFORM=linux/amd64 bash scripts/docker-ship.sh laya-decision-api:1.0.1 ./dist
 #   WITH_WEIGHTS=1 bash scripts/docker-ship.sh                      # 连权重一起打包（离线服务器用）
 #
 # 关键前提：**镜像架构 = 构建机架构**。在 x86_64 的 Ubuntu VM 上构建 → 产物就是 linux/amd64，
 # 直接拷到 x86_64 服务器 `docker load` 即可跑；在 Apple Silicon 上构建则是 arm64，不能拷给 x86。
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
-TAG="${1:-laya-decision-api:1.0.0}"
+# 默认 TAG 的版本号取自 pyproject.toml（唯一来源），避免镜像标签与工程版本脱节
+VER_DEFAULT="$(sed -n 's/^version *= *"\([^"]*\)".*/\1/p' "${ROOT}/pyproject.toml" | head -1)"
+TAG="${1:-laya-decision-api:${VER_DEFAULT:-latest}}"
 OUT="${2:-${ROOT}/dist}"
 PLATFORM="${PLATFORM:-}"
 WITH_WEIGHTS="${WITH_WEIGHTS:-0}"
@@ -60,7 +62,7 @@ print('  laya       :', getattr(laya, '__version__', '仓库版')); \
 print('  依赖自检   : ok')"
 
 hr; echo "3) 导出离线包"; hr
-BASE_NAME="laya-decision-api-${IMG_ARCH}-${TAG##*:}"
+BASE_NAME="laya-decision-api-${TAG##*:}-${IMG_ARCH}"   # 名-版本-架构，与 /opt 交付件命名一致
 TARBALL="${OUT}/${BASE_NAME}.tar.gz"
 echo "  docker save → ${TARBALL}（约 1–2GB，视基础镜像而定）"
 docker save "${TAG}" | gzip -1 > "${TARBALL}"

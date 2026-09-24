@@ -45,14 +45,37 @@ else
   esac
 fi
 
+# 可选透传：这些环境变量设了就随 --build-arg 传进去（不设则用 Dockerfile 默认值）
+# 典型用法：LAY开头的服务参数（端口/鉴权/路径）在这里给默认，运行时还能用 -e 再覆盖
+PASSTHROUGH=(APP_DIR MODELS_DIR LAYA_RUN_USER LAYA_RUN_UID LAYA_RUN_GID \
+             LAYA_API_HOST LAYA_API_PORT LAYA_ENGINE LAYA_MODEL LAYA_BACKEND LAYA_MODEL_DIR \
+             LAYA_WARM_ON_START LAYA_PREFIX_CACHE LAYA_MAX_QUEUE LAYA_DEFAULT_TIMEOUT_MS \
+             LAYA_BUSY_RETRY_AFTER_S LAYA_MAX_STATE_CHARS LAYA_MAX_OPTIONS \
+             LAYA_AUTH_MODE LAYA_API_KEYS LAYA_AUTH_HEADER LAYA_AUTH_PROTECT_STATUS \
+             LAYA_AUTH_PUBLIC_PATHS LAYA_RATE_LIMIT_PER_MIN LAYA_RATE_LIMIT_BURST)
+EXTRA_ARGS=()
+for _n in "${PASSTHROUGH[@]}"; do
+  _v="$(printenv "$_n" || true)"
+  if [ -n "${_v}" ]; then
+    EXTRA_ARGS+=(--build-arg "${_n}=${_v}")
+    case "$_n" in
+      LAYA_API_KEYS) echo "  传参 ${_n}=***（已隐藏）";;
+      *)             echo "  传参 ${_n}=${_v}";;
+    esac
+  fi
+done
+
 echo "构建 $TAG"
 # 想用“已装好 torch 的官方基础镜像”就加：
 #   --build-arg BASE_IMAGE=pytorch/pytorch:<ver>-...-runtime --build-arg RUN_BASE_IMAGE=<同一个>
 "${BUILD_CMD[@]}" \
   --build-arg PIP_INDEX_URL_BUILD="${PIP_INDEX_URL_BUILD:-https://pypi.tuna.tsinghua.edu.cn/simple}" \
   --build-arg TORCH_INDEX_URL="${TORCH_INDEX_URL:-https://download.pytorch.org/whl/cpu}" \
+  --build-arg DEBIAN_MIRROR="${DEBIAN_MIRROR-https://mirrors.tuna.tsinghua.edu.cn}" \
+  --build-arg PIP_FLAGS="${PIP_FLAGS:-}" \
   --build-arg BASE_IMAGE="${BASE_IMAGE:-python:3.12-slim-bookworm}" \
   --build-arg RUN_BASE_IMAGE="${RUN_BASE_IMAGE:-python:3.12-slim-bookworm}" \
+  "${EXTRA_ARGS[@]}" \
   -t "$TAG" "$@" "$ROOT"
 
 # 产物架构核对：这一步能直接拦住“在 Mac 上构建、往 x86 服务器推”的经典事故
