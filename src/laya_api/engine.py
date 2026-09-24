@@ -367,9 +367,11 @@ class Engine:
         if not job.event.wait(policy.timeout_ms / 1000.0):
             with self._stats_lock:
                 self._stats["timeouts"] += 1
+            # 文案必须点名**真实生效后端**：policy.backend 默认 "auto"，未解析前直接拼会得到 "auto"
+            _bk = job.backend if job.backend and job.backend != "auto" else (self._resolved_backend or self.backend)
             raise ApiError("TIMEOUT", f"超过 timeout_ms={policy.timeout_ms}",
                            {"inference_still_running": True,
-                            "note": "MLX 推理不可中断；本次前向跑完才会释放 worker"})
+                            "note": f"{_bk} 推理不可中断；本次前向跑完才会释放 worker"})
         if job.error is not None:
             with self._stats_lock:
                 self._stats["errors"] += 1

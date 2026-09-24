@@ -62,7 +62,11 @@ print('  laya       :', getattr(laya, '__version__', '仓库版')); \
 print('  依赖自检   : ok')"
 
 hr; echo "3) 导出离线包"; hr
-BASE_NAME="laya-decision-api-${TAG##*:}-${IMG_ARCH}"   # 名-版本-架构，与 /opt 交付件命名一致
+VER_PART="${TAG##*:}"
+case "${VER_PART}" in
+  *"${IMG_ARCH}") BASE_NAME="laya-decision-api-${VER_PART}" ;;              # 标签里已带架构，不重复拼
+  *)               BASE_NAME="laya-decision-api-${VER_PART}-${IMG_ARCH}" ;; # 名-版本-架构，与 /opt 交付件命名一致
+esac
 TARBALL="${OUT}/${BASE_NAME}.tar.gz"
 echo "  docker save → ${TARBALL}（约 1–2GB，视基础镜像而定）"
 docker save "${TAG}" | gzip -1 > "${TARBALL}"

@@ -382,6 +382,21 @@ def main() -> int:
                 assert bad.status_code == 400, bad.text
                 assert bad.json()["error"]["code"] == "SCHEMA_INVALID", bad.text
 
+                # 超时契约：timeout_ms 极小时回 504，且 details.note 必须点名**真实后端**
+                # （曾写死 "MLX 推理不可中断"，跑 torch 时文案错）
+                bk = r.json().get("backend", "")
+                to = await c.post("/v1/decide", json={
+                    "state": "x",
+                    "questions": {"a": {"type": "choice", "instructions": "i", "criteria": ["x", "y"]}},
+                    "policy": {"timeout_ms": 1},
+                })
+                assert to.status_code == 504, to.text
+                terr = to.json()["error"]
+                assert terr["code"] == "TIMEOUT", terr
+                tnote = terr["details"]["note"]
+                assert bk and bk in tnote, f"超时说明未反映真实后端（backend={bk!r}, note={tnote!r}）"
+                assert terr["details"]["inference_still_running"] is True
+
         asyncio.run(go())
 
     check("HTTP /healthz /readyz /v1/status /v1/presets /v1/decide + 错误契约", http_flow)
