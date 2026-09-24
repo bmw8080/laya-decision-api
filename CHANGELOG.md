@@ -10,6 +10,11 @@
   依赖模型前向的用例统一 `SKIP`；并修正 `/readyz?warm=1`、`/v1/presets`、鉴权用例在无后端时的预期
   （503 `MODEL_UNAVAILABLE` 属预期）—— CI 此前会因缺后端而失败，现在实测 `10 passed, 0 failed, 12 skipped`，退出码 0
 
+### 系统优化
+- CI 增加 Python 版本矩阵（3.11 / 3.12 / 3.13）—— pyproject 声明支持三档，此前只测 3.12
+- 新增 `.github/dependabot.yml`：pip 依赖与 GitHub Actions 版本每周/每月自动检查
+- 新增 `scripts/push-all.sh`：一条命令把分支与 tag 同时推到 GitHub 与 Gitee（防镜像仓库落后）
+
 ### 文档更新
 - README 增加「支持这个项目」（微信打赏码，自愿；不影响功能与 issue 优先级）
 - 新增 **docs/openapi-profiles.md**：OpenAPI 三档（3.1 / 3.0 / 扁平档）对照、各自改写了什么、

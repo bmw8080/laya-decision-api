@@ -8,11 +8,16 @@ on:
 jobs:
   contract-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # pyproject 声明支持 3.11 / 3.12 / 3.13 —— 三档都要真跑，别只测一个
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
       - name: 安装依赖
         run: |
           python -m pip install --upgrade pip

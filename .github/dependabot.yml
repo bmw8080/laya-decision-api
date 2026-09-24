@@ -1,0 +1,23 @@
+# 依赖自动更新（pip 依赖 + GitHub Actions 版本）
+# 目的：别让仓库躺着过期 —— 每周自动开 PR，CI 绿了再合。
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      # 一次一个 PR 太吵：把主框架与工具链分开成两组
+      web-stack:
+        patterns: ["fastapi", "uvicorn", "pydantic", "httpx", "starlette"]
+      openapi-tools:
+        patterns: ["openapi-spec-validator", "openapi-schema-validator", "jsonschema"]
+    labels: ["dependencies"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: monthly
+    labels: ["dependencies", "ci"]

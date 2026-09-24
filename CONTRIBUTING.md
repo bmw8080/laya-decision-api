@@ -46,6 +46,14 @@ npx -p typescript@5.9.2 tsc --noEmit -p sdk/ts
 - 没有实测支撑的性能断言或"兼容性说明"。
 - 把 README 内容塞回 `/wiki`（`/wiki` 只渲染 OpenAPI，见 `tests/run_contract_tests.py` 的守门断言）。
 
+## 维护者守则
+
+- **两个远端必须一致**：GitHub（`origin`）与 Gitee（`gitee`）是同一份代码，提交后用
+  `bash scripts/push-all.sh` 一次推两边。只推一个远端就会出现"Gitee 落后一版"这类问题。
+- **发版流程**：改 `pyproject.toml` 的版本（唯一来源）→ 更新 `CHANGELOG.md` → 打 tag →
+  `bash scripts/push-all.sh` → 构建镜像并推 Docker Hub（`scripts/docker-ship.sh` + `crane push`）。
+- **CI 必须绿**：三个 Python 版本（3.11/3.12/3.13）与两个 SDK 编译都要过；`main` 建议开启分支保护。
+
 ## 许可
 
 提交即表示同意以 [Apache License 2.0](LICENSE) 授权你的贡献。
