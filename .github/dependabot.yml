@@ -5,9 +5,9 @@ updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: monthly
-      day: monday
-    open-pull-requests-limit: 5
+      interval: weekly
+      # day: monday
+    open-pull-requests-limit: 0
     groups:
       # 一次一个 PR 太吵：把主框架与工具链分开成两组
       web-stack:
@@ -20,4 +20,5 @@ updates:
     directory: "/"
     schedule:
       interval: monthly
-    labels: ["dependencies", "ci"]
+    open-pull-requests-limit: 0
+    # labels: ["dependencies", "ci"]
