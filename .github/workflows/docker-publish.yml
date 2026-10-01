@@ -47,7 +47,7 @@ jobs:
 
       - name: 恢复权重缓存
         if: steps.cfg.outputs.with_weights == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: weights
           key: laya-weights-multilingual-v1
